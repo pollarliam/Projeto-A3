@@ -29,6 +29,31 @@
 		0CA37B2A2E974FCE0006E510 /* whereto-SwiftUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "whereto-SwiftUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0CBAB3A52E9758CE00F7FE67 /* Exceptions for "Data" folder in "whereto-SwiftTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Dataset1.json,
+				voos_aerobrasil_2019_2024.csv,
+				voos_airregional_2019_2024.csv,
+				voos_globalwings_2019_2024.csv,
+				voos_skyfast_2019_2024.csv,
+			);
+			target = 0CA37B1F2E974FCE0006E510 /* whereto-SwiftTests */;
+		};
+		0CBAB3A62E9758CE00F7FE67 /* Exceptions for "Data" folder in "whereto-SwiftUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Dataset1.json,
+				voos_aerobrasil_2019_2024.csv,
+				voos_airregional_2019_2024.csv,
+				voos_globalwings_2019_2024.csv,
+				voos_skyfast_2019_2024.csv,
+			);
+			target = 0CA37B292E974FCE0006E510 /* whereto-SwiftUITests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0CA37B132E974FCC0006E510 /* whereto-Swift */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -43,6 +68,15 @@
 		0CA37B2D2E974FCE0006E510 /* whereto-SwiftUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "whereto-SwiftUITests";
+			sourceTree = "<group>";
+		};
+		0CBAB3982E9758CE00F7FE67 /* Data */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				0CBAB3A52E9758CE00F7FE67 /* Exceptions for "Data" folder in "whereto-SwiftTests" target */,
+				0CBAB3A62E9758CE00F7FE67 /* Exceptions for "Data" folder in "whereto-SwiftUITests" target */,
+			);
+			path = Data;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -75,6 +109,7 @@
 		0CA37B082E974FCC0006E510 = {
 			isa = PBXGroup;
 			children = (
+				0CBAB3982E9758CE00F7FE67 /* Data */,
 				0CA37B132E974FCC0006E510 /* whereto-Swift */,
 				0CA37B232E974FCE0006E510 /* whereto-SwiftTests */,
 				0CA37B2D2E974FCE0006E510 /* whereto-SwiftUITests */,
@@ -109,6 +144,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				0CA37B132E974FCC0006E510 /* whereto-Swift */,
+				0CBAB3982E9758CE00F7FE67 /* Data */,
 			);
 			name = "whereto-Swift";
 			packageProductDependencies = (
