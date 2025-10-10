@@ -1,24 +1,20 @@
 import SwiftData
 import Foundation
 
-//Preparando banco de dados — esta função procura o banco no bundle e então copia ele para ApplicationSupport. Caso não exista um banco no bundle ela joga um erro.
+//Preparando banco de dados — esta função procura o banco no bundle e então cria uma pasta em ApplicationSupport e copia o banco para lá. Caso não exista um banco no bundle ela joga um erro.
 
 func prepareDatabaseURL() -> URL {
-    guard let bundledURL = Bundle.main.url(forResource: "wheretoData", withExtension: "db") else {
-        fatalError("wheretoData.db not found in bundle resources")
-    }
-    
+  
     let fm = FileManager.default
     let appSupport = try! fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-    let bundleID = Bundle.main.bundleIdentifier ?? "com.liam.whereTo"
+    let bundleID = Bundle.main.bundleIdentifier ?? "com.liam.whereto"
     let dir = appSupport.appendingPathComponent(bundleID, isDirectory: true)
     try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-    
     let destination = dir.appendingPathComponent("wheretoData.db", isDirectory: false)
     
     if !fm.fileExists(atPath: destination.path) {
         guard let bundledURL = Bundle.main.url(forResource: "wheretoData", withExtension: "db") else {
-            fatalError("wheretoData.db not found in bundle resources")
+            fatalError("Database not found in bundle resources")
         }
         do {
             try fm.copyItem(at: bundledURL, to: destination)
@@ -27,12 +23,15 @@ func prepareDatabaseURL() -> URL {
         }
     }
     
+  
+    
     return destination
 }
 
 @Model
 final class FlightClass {
-    @Attribute(.unique) var id: Int
+    @Attribute(.unique)
+    var id: Int
     var csv_id: Int
     var depdate: String
     var origin: String
@@ -46,9 +45,10 @@ final class FlightClass {
     var population: Int
     var airline: String
     
-    init(csv_id: Int, depdate: String, origin: String, destination: String, duration: Double,
+    init(id: Int, csv_id: Int, depdate: String, origin: String, destination: String, duration: Double,
          price_eco: Double, price_exec: Double, price_premium: Double,
          demand: String, early: Int, population: Int, airline: String) {
+        self.id = id
         self.csv_id = csv_id
         self.depdate = depdate
         self.origin = origin
@@ -66,7 +66,7 @@ final class FlightClass {
 
 
 let databaseURL = prepareDatabaseURL()
-let container = try ModelContainer(
+let container = try! ModelContainer(
     for: FlightClass.self,
     configurations: ModelConfiguration(url: databaseURL)
 )
