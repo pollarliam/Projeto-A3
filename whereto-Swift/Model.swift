@@ -9,7 +9,14 @@ func prepareDatabaseURL() -> URL {
     let appSupport = try! fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
     let bundleID = Bundle.main.bundleIdentifier ?? "com.liam.whereto"
     let dir = appSupport.appendingPathComponent(bundleID, isDirectory: true)
-    try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    
+    do {
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        print("✅ Created directory at:", dir.path)
+    } catch {
+        print("❌ Failed to create directory:", error)
+    }
+    
     let destination = dir.appendingPathComponent("wheretoData.db", isDirectory: false)
     
     if !fm.fileExists(atPath: destination.path) {
@@ -23,13 +30,15 @@ func prepareDatabaseURL() -> URL {
         }
     }
     
-  
+    print("App Support directory:", appSupport.path)
+    print("App-specific directory:", dir.path)
+    print("Database destination:", destination.path)
     
     return destination
 }
 
 @Model
-final class FlightClass {
+final class Flights {
     @Attribute(.unique)
     var id: Int
     var csv_id: Int
@@ -67,6 +76,6 @@ final class FlightClass {
 
 let databaseURL = prepareDatabaseURL()
 let container = try! ModelContainer(
-    for: FlightClass.self,
+    for: Flights.self,
     configurations: ModelConfiguration(url: databaseURL)
 )
