@@ -1,0 +1,72 @@
+import SwiftData
+import Foundation
+
+//Preparando banco de dados — esta função procura o banco no bundle e então copia ele para ApplicationSupport. Caso não exista um banco no bundle ela joga um erro.
+
+func prepareDatabaseURL() -> URL {
+    guard let bundledURL = Bundle.main.url(forResource: "wheretoData", withExtension: "db") else {
+        fatalError("wheretoData.db not found in bundle resources")
+    }
+    
+    let fm = FileManager.default
+    let appSupport = try! fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    let bundleID = Bundle.main.bundleIdentifier ?? "com.liam.whereTo"
+    let dir = appSupport.appendingPathComponent(bundleID, isDirectory: true)
+    try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    
+    let destination = dir.appendingPathComponent("wheretoData.db", isDirectory: false)
+    
+    if !fm.fileExists(atPath: destination.path) {
+        guard let bundledURL = Bundle.main.url(forResource: "wheretoData", withExtension: "db") else {
+            fatalError("wheretoData.db not found in bundle resources")
+        }
+        do {
+            try fm.copyItem(at: bundledURL, to: destination)
+        } catch {
+            fatalError("Failed to copy preloaded database: \(error)")
+        }
+    }
+    
+    return destination
+}
+
+@Model
+final class FlightClass {
+    @Attribute(.unique) var id: Int
+    var csv_id: Int
+    var depdate: String
+    var origin: String
+    var destination: String
+    var duration: Double
+    var price_eco: Double
+    var price_exec: Double
+    var price_premium: Double
+    var demand: String
+    var early: Int
+    var population: Int
+    var airline: String
+    
+    init(csv_id: Int, depdate: String, origin: String, destination: String, duration: Double,
+         price_eco: Double, price_exec: Double, price_premium: Double,
+         demand: String, early: Int, population: Int, airline: String) {
+        self.csv_id = csv_id
+        self.depdate = depdate
+        self.origin = origin
+        self.destination = destination
+        self.duration = duration
+        self.price_eco = price_eco
+        self.price_exec = price_exec
+        self.price_premium = price_premium
+        self.demand = demand
+        self.early = early
+        self.population = population
+        self.airline = airline
+    }
+}
+
+
+let databaseURL = prepareDatabaseURL()
+let container = try ModelContainer(
+    for: FlightClass.self,
+    configurations: ModelConfiguration(url: databaseURL)
+)

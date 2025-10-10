@@ -2,10 +2,7 @@ import SwiftUI
 import MapKit
 
 
-
-
 struct MainView: View {
-    @StateObject private var viewModel = FlightsViewModel()
     @State private var sidebarSelection: String? = "overview"
     @State private var cameraPosition: MapCameraPosition = .region(
         MKCoordinateRegion(
@@ -22,34 +19,26 @@ struct MainView: View {
                 SearchBarView()
                 // Cartas com voos
                 Section {
-                    ForEach(viewModel.flights) { flight in
-                        FlightCardView(
-                            code: "\(flight.airline) \(flight.id)",
-                            route: "\(flight.origin) → \(flight.destination)",
-                            status: "",
-                            dep: "",
-                            arr: "—",
-                            priceEco: flight.priceEco,
-                            priceExec: flight.priceExec,
-                            pricePremium: flight.pricePremium
-                        )
-                    }
+                    FlightCardView(code: "AC 847", route: "YYZ → FCO", status: "On Time", dep: "18:35", arr: "08:15")
+                    FlightCardView(code: "DL 120", route: "JFK → CDG", status: "Delayed", dep: "21:10", arr: "10:55")
+                    FlightCardView(code: "BA 49", route: "LHR → SEA", status: "Boarding", dep: "16:05", arr: "18:45")
+                    FlightCardView(code: "QF 12", route: "LAX → SYD", status: "Scheduled", dep: "22:30", arr: "07:10")
+                    FlightCardView(code: "AZ 847", route: "GRU → CNF", status: "Delayed", dep: "18:35", arr: "20:00")
+                    FlightCardView(code: "DL 120", route: "JFK → CDG", status: "Delayed", dep: "21:10", arr: "10:55")
+                    FlightCardView(code: "BA 49", route: "LHR → SEA", status: "Boarding", dep: "16:05", arr: "18:45")
+                    FlightCardView(code: "QF 12", route: "LAX → SYD", status: "Boarding", dep: "22:30", arr: "07:10")
+                    FlightCardView(code: "AC 847", route: "YYZ → FCO", status: "On Time", dep: "18:35", arr: "08:15")
+                    FlightCardView(code: "DL 120", route: "JFK → CDG", status: "Delayed", dep: "21:10", arr: "10:55")
+                    FlightCardView(code: "BA 49", route: "LHR → SEA", status: "Boarding", dep: "16:05", arr: "18:45")
+                    FlightCardView(code: "QF 12", route: "LAX → SYD", status: "Scheduled", dep: "22:30", arr: "07:10")
                 }
                 .listSectionSeparator(.hidden)
                 .listRowBackground(Color.clear)
             }
             .frame(minWidth: 280)
-            .onAppear {
-                viewModel.load()
-            }
-            .toolbar {
-                Button("Sort by Price") {
-                    viewModel.flights.sort { $0.priceEco < $1.priceEco }
-                }
-            }
         } detail: {
             ZStack {
-                // Globo
+                // Background full-window map
                 Map(position: $cameraPosition)
                     .mapStyle(.imagery(elevation: .realistic))
                     .ignoresSafeArea()
@@ -67,9 +56,6 @@ private struct FlightCardView: View {
     let status: String
     let dep: String
     let arr: String
-    let priceEco: String
-    let priceExec: String
-    let pricePremium: String
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -84,11 +70,6 @@ private struct FlightCardView: View {
             Text(route)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            HStack {
-                Text("Eco: \(priceEco,) · Exec: \(priceExec,) · Premium: \(pricePremium,)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
             HStack(spacing: 16) {
                 HStack(spacing: 4) {
                     Image(systemName: "airplane.departure")
@@ -122,7 +103,6 @@ private struct FlightCardView: View {
         }
     }
 }
-
 private struct SearchBarView: View {
     @State private var searchText: String = ""
     var body: some View {
