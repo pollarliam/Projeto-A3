@@ -10,17 +10,8 @@ import SwiftData
 
 @main
 struct whereto_SwiftApp: App {
-    // Use the ModelContainer defined in Model.swift (ensures DB prep runs)
-    let sharedModelContainer: ModelContainer = {
-        print("[App] Initializing sharedModelContainer using Model.swift container…")
-        return container
-    }()
-
-    init() {
-        print("[App] whereto_SwiftApp init")
-        // Force database preparation in case globals are optimized differently in some contexts
-        _ = databaseURL
-    }
+    // Use the single shared container defined in Model.swift
+    let sharedModelContainer: ModelContainer = Database.container
 
     var body: some Scene {
         WindowGroup {

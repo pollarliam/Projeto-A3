@@ -1,8 +1,19 @@
 import SwiftUI
 import MapKit
+import SwiftData
 
 
 struct MainView: View {
+    @Environment(\.modelContext) private var modelContext
+    
+    var body: some View {
+        MainContentView(context: modelContext)
+    }
+}
+
+private struct MainContentView: View {
+    @StateObject private var viewModel: FlightsViewModel
+    
     @State private var sidebarSelection: String? = "overview"
     @State private var cameraPosition: MapCameraPosition = .region(
         MKCoordinateRegion(
@@ -11,34 +22,40 @@ struct MainView: View {
         )
     )
     
+    init(context: ModelContext) {
+        _viewModel = StateObject(wrappedValue: FlightsViewModel(context: context))
+    }
     
     var body: some View {
         NavigationSplitView {
             List(selection: $sidebarSelection) {
                 // Barra de pesquisa
-                SearchBarView()
+                SearchBarView(searchText: $viewModel.searchText)
                 // Cartas com voos
                 Section {
-                    FlightCardView(code: "AC 847", route: "YYZ → FCO", status: "On Time", dep: "18:35", arr: "08:15")
-                    FlightCardView(code: "DL 120", route: "JFK → CDG", status: "Delayed", dep: "21:10", arr: "10:55")
-                    FlightCardView(code: "BA 49", route: "LHR → SEA", status: "Boarding", dep: "16:05", arr: "18:45")
-                    FlightCardView(code: "QF 12", route: "LAX → SYD", status: "Scheduled", dep: "22:30", arr: "07:10")
-                    FlightCardView(code: "AZ 847", route: "GRU → CNF", status: "Delayed", dep: "18:35", arr: "20:00")
-                    FlightCardView(code: "DL 120", route: "JFK → CDG", status: "Delayed", dep: "21:10", arr: "10:55")
-                    FlightCardView(code: "BA 49", route: "LHR → SEA", status: "Boarding", dep: "16:05", arr: "18:45")
-                    FlightCardView(code: "QF 12", route: "LAX → SYD", status: "Boarding", dep: "22:30", arr: "07:10")
-                    FlightCardView(code: "AC 847", route: "YYZ → FCO", status: "On Time", dep: "18:35", arr: "08:15")
-                    FlightCardView(code: "DL 120", route: "JFK → CDG", status: "Delayed", dep: "21:10", arr: "10:55")
-                    FlightCardView(code: "BA 49", route: "LHR → SEA", status: "Boarding", dep: "16:05", arr: "18:45")
-                    FlightCardView(code: "QF 12", route: "LAX → SYD", status: "Scheduled", dep: "22:30", arr: "07:10")
+                    ForEach(viewModel.flights, id: \.id) { flight in
+                        FlightCardView(
+                            code: flight.airline + " " + String(flight.id),
+                            route: "\(flight.origin) → \(flight.destination)",
+                            status: flight.demand,
+                            dep: flight.depdate,
+                            arr: ""
+                        )
+                    }
                 }
                 .listSectionSeparator(.hidden)
                 .listRowBackground(Color.clear)
             }
             .frame(minWidth: 280)
+            .task {
+                #if DEBUG
+                debugValidateContainer()
+                #endif
+                viewModel.load()
+            }
         } detail: {
             ZStack {
-                // Background full-window map
+                // Globo
                 Map(position: $cameraPosition)
                     .mapStyle(.imagery(elevation: .realistic))
                     .ignoresSafeArea()
@@ -104,7 +121,12 @@ private struct FlightCardView: View {
     }
 }
 private struct SearchBarView: View {
-    @State private var searchText: String = ""
+    @Binding var searchText: String
+    
+    init(searchText: Binding<String>) {
+        self._searchText = searchText
+    }
+    
     var body: some View {
         Section {
             HStack(spacing: 8) {
