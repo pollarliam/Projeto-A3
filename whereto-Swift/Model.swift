@@ -25,9 +25,9 @@ func prepareDatabaseURL() -> URL {
     
     do {
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        dbLog("✅ Created directory at:", dir.path)
+        dbLog("Created directory at:", dir.path)
     } catch {
-        dbLog("❌ Failed to create directory:", error.localizedDescription)
+        dbLog("Failed to create directory:", error.localizedDescription)
     }
     
     let destination = dir.appendingPathComponent("wheretoData.db", isDirectory: false)
@@ -41,9 +41,9 @@ func prepareDatabaseURL() -> URL {
         dbLog("Found bundled DB at:", bundledURL.path)
         do {
             try fm.copyItem(at: bundledURL, to: destination)
-            dbLog("✅ Copied preloaded database to:", destination.path)
+            dbLog("Copied preloaded database to:", destination.path)
         } catch {
-            dbLog("❌ Failed to copy preloaded database:", error.localizedDescription)
+            dbLog("Failed to copy preloaded database:", error.localizedDescription)
             fatalError("Failed to copy preloaded database: \(error)")
         }
     }
@@ -80,18 +80,17 @@ func importLegacyIfNeeded(into container: ModelContainer) {
 
     var db: OpaquePointer? = nil
     if sqlite3_open(path, &db) != SQLITE_OK {
-        dbLog("❌ sqlite3_open failed:", String(cString: sqlite3_errmsg(db)))
+        dbLog("sqlite3_open failed:", String(cString: sqlite3_errmsg(db)))
         sqlite3_close(db)
-        return
+        return 
     }
     defer { sqlite3_close(db) }
 
-    // Adjust table/column names to match your legacy schema if needed.
     let query = "SELECT id, csv_id, depdate, origin, destination, duration, price_eco, price_exec, price_premium, demand, early, population, airline FROM flights"
 
     var stmt: OpaquePointer? = nil
     if sqlite3_prepare_v2(db, query, -1, &stmt, nil) != SQLITE_OK {
-        dbLog("❌ sqlite3_prepare_v2 failed:", String(cString: sqlite3_errmsg(db)))
+        dbLog("sqlite3_prepare_v2 failed:", String(cString: sqlite3_errmsg(db)))
         sqlite3_finalize(stmt)
         return
     }
@@ -101,14 +100,13 @@ func importLegacyIfNeeded(into container: ModelContainer) {
     var imported = 0
 
     while sqlite3_step(stmt) == SQLITE_ROW {
-        // Extract columns with safe conversions
         let id = Int(sqlite3_column_int64(stmt, 0))
         let csv_id = Int(sqlite3_column_int64(stmt, 1))
         let depdate = String(cString: sqlite3_column_text(stmt, 2))
         let origin = String(cString: sqlite3_column_text(stmt, 3))
         let destination = String(cString: sqlite3_column_text(stmt, 4))
         let duration = sqlite3_column_double(stmt, 5)
-        let price_eco = sqlite3_column_double(stmt, 6)
+        let price_eco = Double(sqlite3_column_double(stmt, 6))
         let price_exec = sqlite3_column_double(stmt, 7)
         let price_premium = sqlite3_column_double(stmt, 8)
         let demand = String(cString: sqlite3_column_text(stmt, 9))
@@ -135,13 +133,13 @@ func importLegacyIfNeeded(into container: ModelContainer) {
         imported += 1
 
         if imported % 500 == 0 { // save in batches to reduce memory
-            do { try context.save() } catch { dbLog("❌ Save failed at batch:", imported, error.localizedDescription) }
+            do { try context.save() } catch { dbLog("Save failed at batch:", imported, error.localizedDescription) }
         }
     }
 
-    do { try context.save() } catch { dbLog("❌ Final save failed:", error.localizedDescription) }
+    do { try context.save() } catch { dbLog("Final save failed:", error.localizedDescription) }
 
-    dbLog("✅ Import completed. Imported rows:", imported)
+    dbLog("Import completed. Imported rows:", imported)
     defaults.set(true, forKey: userDefaultsImportKey())
 }
 #endif

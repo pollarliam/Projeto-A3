@@ -13,7 +13,6 @@ struct MainView: View {
 
 private struct MainContentView: View {
     @StateObject private var viewModel: FlightsViewModel
-    
     @State private var sidebarSelection: String? = "overview"
     @State private var cameraPosition: MapCameraPosition = .region(
         MKCoordinateRegion(
@@ -37,20 +36,28 @@ private struct MainContentView: View {
                         FlightCardView(
                             code: flight.airline + " " + String(flight.id),
                             route: "\(flight.origin) → \(flight.destination)",
-                            status: flight.demand,
-                            dep: flight.depdate,
-                            arr: ""
+                            price: flight.price_eco,
+                            dep: flight.depdate
                         )
+                        .onAppear {
+                            viewModel.loadMoreIfNeeded(currentItem: flight)
+                        }
                     }
                 }
                 .listSectionSeparator(.hidden)
                 .listRowBackground(Color.clear)
             }
             .frame(minWidth: 280)
+            .overlay(alignment: .topLeading) {
+                if viewModel.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .padding(.leading, 8)
+                        .padding(.top, 8)
+                        .transition(.opacity)
+                }
+            }
             .task {
-                #if DEBUG
-                debugValidateContainer()
-                #endif
                 viewModel.load()
             }
         } detail: {
@@ -60,7 +67,20 @@ private struct MainContentView: View {
                     .mapStyle(.imagery(elevation: .realistic))
                     .ignoresSafeArea()
                 
-                
+                VStack {
+                    HStack {
+                        if viewModel.isLoading {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .padding(6)
+                                .background(.thinMaterial, in: Capsule())
+                                .padding([.top, .leading], 8)
+                        }
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .allowsHitTesting(false)
             }
         }
     }
@@ -70,19 +90,18 @@ private struct MainContentView: View {
 private struct FlightCardView: View {
     let code: String
     let route: String
-    let status: String
+    let price: Double
     let dep: String
-    let arr: String
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(code)
                     .font(.headline)
                 Spacer()
-                Text(status)
+                Text(price, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
                     .font(.subheadline)
-                    .foregroundStyle(statusColor)
+                    .foregroundStyle(.secondary)
             }
             Text(route)
                 .font(.subheadline)
@@ -91,10 +110,6 @@ private struct FlightCardView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "airplane.departure")
                     Text(dep)
-                }
-                HStack(spacing: 4) {
-                    Image(systemName: "airplane.arrival")
-                    Text(arr)
                 }
             }
             .font(.footnote)
@@ -108,18 +123,8 @@ private struct FlightCardView: View {
         )
         .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
     }
-    
-    private var statusColor: Color {
-        switch status.lowercased() {
-        case "on time", "boarding":
-            return .green
-        case "delayed":
-            return .orange
-        default:
-            return .secondary
-        }
-    }
 }
+
 private struct SearchBarView: View {
     @Binding var searchText: String
     
@@ -135,7 +140,7 @@ private struct SearchBarView: View {
                 TextField("Where to?", text: $searchText)
                     .textFieldStyle(.plain)
             }
-            .padding(8)
+            .padding()
             .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 4, trailing: 12))
@@ -146,3 +151,4 @@ private struct SearchBarView: View {
 #Preview {
     MainView()
 }
+

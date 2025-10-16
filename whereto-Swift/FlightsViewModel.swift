@@ -8,66 +8,87 @@ final class FlightsViewModel: ObservableObject {
     @Published var searchText: String = "" {
         didSet { applySearch() }
     }
+    @Published var isLoading: Bool = false
 
     private var allFlights: [Flights] = []
     private let context: ModelContext
+    private let batchSize: Int = 500
+    private var nextOffset: Int = 0
+    private var hasMore: Bool = true
+    private var isBackgroundLoading: Bool = false
 
     init(context: ModelContext) {
         self.context = context
     }
 
     func load() {
+        // Load just the first page synchronously for fast UI
+        isLoading = true
+        nextOffset = 0
+        hasMore = true
+        allFlights.removeAll()
+        flights.removeAll()
+        loadNextPage(initial: true)
+    }
+
+    private func loadNextPage(initial: Bool = false) {
+        guard hasMore, !isBackgroundLoading else { return }
+        isBackgroundLoading = true
+        let limit = batchSize
+        let offset = nextOffset
         do {
-            let descriptor = FetchDescriptor<Flights>(
+            var descriptor = FetchDescriptor<Flights>(
                 sortBy: [
                     .init(\.depdate, order: .forward),
                     .init(\.origin, order: .forward)
                 ]
             )
-            print("[VM] Fetching Flights with descriptor…")
-            allFlights = try context.fetch(descriptor)
-            print("[VM] Fetch succeeded. total:", allFlights.count)
-            if let first = allFlights.first {
-                print("[VM] First sample:", first.origin, "->", first.destination, "airline:", first.airline)
-            }
+            descriptor.fetchLimit = limit
+            descriptor.fetchOffset = offset
+            let page = try context.fetch(descriptor)
+            if page.isEmpty { hasMore = false }
+            allFlights.append(contentsOf: page)
+            nextOffset += page.count
             applySearch()
         } catch {
-            print("[VM] ❌ Failed to fetch flights:", error)
-            allFlights = []
-            flights = []
+            print("[VM] ❌ Paged fetch failed:", error)
+            hasMore = false
         }
-        print("[VM] Loaded flights count:", allFlights.count)
+        isBackgroundLoading = false
+        if initial { isLoading = false }
     }
 
     private func applySearch() {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
+        if trimmed.isEmpty {
             flights = allFlights
+        } else {
+            let lower = trimmed.lowercased()
+            flights = allFlights.filter { flight in
+                flight.origin.lowercased().contains(lower) ||
+                flight.destination.lowercased().contains(lower) ||
+                flight.airline.lowercased().contains(lower)
+            }
+        }
+        // If we're showing many fewer than we have, continue background loading
+        maybePrefetchMore()
+    }
+
+    func loadMoreIfNeeded(currentItem item: Flights?) {
+        guard let item = item else {
+            loadNextPage()
             return
         }
-        let lower = trimmed.lowercased()
-        flights = allFlights.filter { flight in
-            flight.origin.lowercased().contains(lower) ||
-            flight.destination.lowercased().contains(lower) ||
-            flight.airline.lowercased().contains(lower)
+        let thresholdIndex = flights.index(flights.endIndex, offsetBy: -50, limitedBy: flights.startIndex) ?? flights.startIndex
+        if let idx = flights.firstIndex(where: { $0.id == item.id }), idx >= thresholdIndex {
+            loadNextPage()
         }
     }
 
-    // DEBUG: Call this once to seed minimal data if the store is empty.
-    // Remember to remove or guard behind #if DEBUG in production.
-    /*
-    func debugSeedIfEmpty() {
-        do {
-            let count = try context.fetchCount(FetchDescriptor<Flights>())
-            print("[VM] Current count:", count)
-            guard count == 0 else { return }
-            let sample = Flights(id: 1, csv_id: 1, depdate: "2025-10-14", origin: "JFK", destination: "CDG", duration: 7.0, price_eco: 500, price_exec: 1200, price_premium: 800, demand: "On Time", early: 0, population: 0, airline: "DL")
-            context.insert(sample)
-            try context.save()
-            print("[VM] Seeded 1 sample flight")
-        } catch {
-            print("[VM] ❌ Seeding failed:", error)
+    private func maybePrefetchMore() {
+        guard searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if hasMore && allFlights.count < 1000 {
+            loadNextPage()
         }
     }
-    */
 }
