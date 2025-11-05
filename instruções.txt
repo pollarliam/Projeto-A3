@@ -1,0 +1,50 @@
+Projeto A3 – Estruturas de Dados e Análise Algorítmica
+Este projeto consiste no estudo e construção de um sistema computacional
+simplificado que utilize os conceitos estudados na UC como algoritmos de busca e
+ordenação e estruturas de dados diversas para resolução de problemas práticos e
+conhecidos e em diferentes contextos. O projeto desenvolvido será apresentado na
+Expo UniFG no final do semestre e por fim, deverá ser escrito um artigo acadêmico com um estudo comparativo dos diferentes algoritmos utilizados, analisando aspectos de desempenho como complexidade ciclomática, tempo de execução e consumo de recursos computacionais.
+
+Projeto A Fazer - Sistema de Busca e Comparação de Passagens Aéreas
+
+Enunciado
+
+Desenvolva um sistema para simular a busca e comparação de passagens aéreas entre
+diferentes destinos e companhias.
+ O sistema deve possibilitar a pesquisa de voos por origem, destino, data e valor, além de permitir ao usuário ordenar os resultados por preço, horário ou duração da viagem.
+Objetivos de aprendizagem
+• Analisar e aplicar estruturas de dados (listas, árvores, tabelas hash, etc...)
+conforme a necessidade do projeto buscando otimizar o uso de recursos
+computacionais e tempo de execução.
+• Utilizar algoritmos de busca (linear, binária, etc...) e algoritmos de ordenação
+(bubble, selection, insertion, quicksort, mergesort, etc...) em memória.
+• Trabalhar com base de dados pública (como a Open Library).
+• Aplicar lógica de programação, abstração e modularização na organização do
+projeto.
+Instruções
+• Os alunos podem implementar manualmente as estruturas de dados e os
+algoritmos de busca/ordenação usados no projeto ou utilizar implementações
+prontas. No entanto, é importante realizar o trabalho de filtro para adotar
+implementações que sejam de fato corretas.
+• É permitido o uso de bibliotecas padrão da linguagem escolhida para
+entrada/saída, manipulação de arquivos ou leitura de dados da base externa.
+• A interface deve ser feita usando alguma tecnologia de GUI e a plataforma pode
+ser web, mobile ou desktop.
+• Stack a ser utilizada fica a critério da equipe.
+• O projeto deve permitir o uso de diferentes algoritmos para as funcionalidades
+de busca e ordenação e deve prover mecanismos para mensuração de
+resultados.
+Etapas do Projeto
+Momento 1 – Implementação do Sistema
+• Levantamento dos requisitos.
+• Escolha e modelagem das estruturas de dados.
+• Implementação dos algoritmos de busca e ordenação.
+• Testes de funcionalidades básicas.
+Momento 2 – Apresentação do projeto na Expo UniFG
+• Demonstração prática do sistema funcional para visitantes e professores.
+Momento 3 – Elaboração de artigo acadêmico
+• Introdução ao problema abordado.
+• Justificativa da escolha do tema e algoritmos/estruturas usados.
+• Descrição técnica das estruturas e algoritmos usados.
+• Resultados obtidos.
+• Discussão sobre eficiência e limitações.

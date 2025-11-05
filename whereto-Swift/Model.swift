@@ -1,3 +1,13 @@
+/// Data layer and model definitions for the app.
+///
+/// Responsibilities:
+/// - Prepare the persistent store location in Application Support.
+/// - (Debug) Import legacy data from a bundled SQLite database into SwiftData.
+/// - Define the `Flights` model schema used by SwiftData.
+/// - Provide a shared `ModelContainer` via `Database.container` for the app to use.
+/// - Model: Everything in this file represents the Model layer (data and persistence schema).
+/// - ViewModel: Consumes this model via a `ModelContext` to fetch/filter/sort (see FlightsViewModel).
+
 import SwiftData
 import Foundation
 import SQLite3
@@ -14,8 +24,15 @@ private func dbLog(_ items: Any...) {
     print("[DB]", items.map { "\($0)" }.joined(separator: " "))
 }
 
-//Preparando banco de dados — esta função procura o banco no bundle e então cria uma pasta em ApplicationSupport e copia o banco para lá. Caso não exista um banco no bundle ela joga um erro.
-
+/// Prepares and returns the file URL for the SwiftData persistent store.
+///
+/// This function creates an app-specific directory under Application Support, then ensures
+/// a preloaded database (wheretoData.db) is present at the destination. If the destination
+/// file does not exist, it copies the bundled DB there. The returned URL is used by
+/// `ModelConfiguration(url:)` to tell SwiftData where to store its data.
+/// - Returns: The URL of the persistent store location.
+/// - Note: In production you may choose to migrate from the bundled DB to SwiftData only once
+///   and then rely solely on SwiftData going forward.
 func prepareDatabaseURL() -> URL {
   
     let fm = FileManager.default
@@ -68,6 +85,14 @@ private func legacyDBPath() -> String {
 
 private func userDefaultsImportKey() -> String { "LegacyImportCompleted" }
 
+/// Imports legacy flight rows from the bundled SQLite database into SwiftData (Debug only).
+///
+/// The import runs once per app installation, controlled by a `UserDefaults` flag. It opens the
+/// old SQLite database, iterates each row in the `flights` table, and creates a corresponding
+/// `Flights` model instance inserted into the provided container's context. Saves occur in batches
+/// to manage memory usage.
+/// - Parameter container: The `ModelContainer` that will receive imported `Flights` records.
+/// - Important: This is intended as a one-time migration utility for development/testing.
 func importLegacyIfNeeded(into container: ModelContainer) {
     let defaults = UserDefaults.standard
     if defaults.bool(forKey: userDefaultsImportKey()) {
@@ -144,6 +169,23 @@ func importLegacyIfNeeded(into container: ModelContainer) {
 }
 #endif
 
+/// A SwiftData model representing a single flight record.
+///
+/// This is the core persisted entity for the app. Each instance corresponds to a row imported
+/// from the legacy database or created in-app. Properties are stored by SwiftData and can be
+/// fetched via a `ModelContext`.
+///
+/// Properties:
+/// - `id`: Unique flight identifier (marked `@Attribute(.unique)` to prevent duplicates).
+/// - `csv_id`: Source identifier from the original CSV/import pipeline.
+/// - `depdate`: Departure date as a string (multiple formats are supported downstream).
+/// - `origin` / `destination`: Airport or location codes.
+/// - `duration`: Flight duration (in minutes or hours depending on your dataset).
+/// - `price_eco` / `price_exec` / `price_premium`: Prices for different fare classes.
+/// - `demand`: Qualitative or quantitative indicator of demand.
+/// - `early`: Flag/counter related to early booking (domain-specific).
+/// - `population`: Population at origin/destination context (domain-specific).
+/// - `airline`: Airline name.
 @Model
 final class Flights {
     @Attribute(.unique)
@@ -180,6 +222,11 @@ final class Flights {
     }
 }
 
+/// Convenience namespace for the app's persistent store configuration.
+///
+/// - `url`: The resolved persistent store URL created by `prepareDatabaseURL()`.
+/// - `container`: A lazily-initialized `ModelContainer` configured for the `Flights` model.
+///   In Debug builds, performs a one-time import from the legacy DB.
 struct Database {
     static let url: URL = prepareDatabaseURL()
 
@@ -197,6 +244,9 @@ struct Database {
 }
 
 #if DEBUG
+/// Utility to validate that the SwiftData container is reachable and populated (Debug only).
+///
+/// Fetches and logs a count of `Flights` and prints a sample row if available.
 func debugValidateContainer() {
     let context = ModelContext(Database.container)
     let count = (try? context.fetchCount(FetchDescriptor<Flights>())) ?? -1
@@ -208,3 +258,4 @@ func debugValidateContainer() {
     }
 }
 #endif
+
