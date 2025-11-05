@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import FoundationModels
 
 struct MockMainView: View {
     var body: some View {
@@ -17,7 +18,9 @@ private struct MockFlight: Identifiable, Equatable {
 }
 
 private struct MockMainContentView: View {
-    // Mocked list of flights 
+    private let model = SystemLanguageModel.default
+    
+    
     @State private var flights: [MockFlight] = [
         MockFlight(id: 0004, airline: "Tanngrisnir", origin: "ASG", destination: "VNM", priceEco: 329.99, depdate: "Oct 21, 09:35"),
         MockFlight(id: 0004, airline: "Tanngrisnir", origin: "ASG", destination: "VNM", priceEco: 329.99, depdate: "Oct 21, 09:35"),
@@ -28,7 +31,6 @@ private struct MockMainContentView: View {
     // Mocked loading and search states
     @State private var isLoading: Bool = false
     @State private var searchText: String = ""
-
     @State private var cameraPosition: MapCameraPosition = .region(
         MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 0, longitude: 0),

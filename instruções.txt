@@ -3,7 +3,9 @@ Este projeto consiste no estudo e construção de um sistema computacional
 simplificado que utilize os conceitos estudados na UC como algoritmos de busca e
 ordenação e estruturas de dados diversas para resolução de problemas práticos e
 conhecidos e em diferentes contextos. O projeto desenvolvido será apresentado na
-Expo UniFG no final do semestre e por fim, deverá ser escrito um artigo acadêmico com um estudo comparativo dos diferentes algoritmos utilizados, analisando aspectos de desempenho como complexidade ciclomática, tempo de execução e consumo de recursos computacionais.
+Expo UniFG no final do semestre e por fim, deverá ser escrito um artigo acadêmico com um
+estudo comparativo dos diferentes algoritmos utilizados, analisando aspectos de desempenho
+como complexidade ciclomática, tempo de execução e consumo de recursos computacionais.
 
 Projeto A Fazer - Sistema de Busca e Comparação de Passagens Aéreas
 

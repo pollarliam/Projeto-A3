@@ -5,9 +5,11 @@
 /// - (Debug) Import legacy data from a bundled SQLite database into SwiftData.
 /// - Define the `Flights` model schema used by SwiftData.
 /// - Provide a shared `ModelContainer` via `Database.container` for the app to use.
+///
+/// MVVM mapping:
 /// - Model: Everything in this file represents the Model layer (data and persistence schema).
 /// - ViewModel: Consumes this model via a `ModelContext` to fetch/filter/sort (see FlightsViewModel).
-
+/// - View: Displays data exposed by the ViewModel.
 import SwiftData
 import Foundation
 import SQLite3
@@ -31,8 +33,6 @@ private func dbLog(_ items: Any...) {
 /// file does not exist, it copies the bundled DB there. The returned URL is used by
 /// `ModelConfiguration(url:)` to tell SwiftData where to store its data.
 /// - Returns: The URL of the persistent store location.
-/// - Note: In production you may choose to migrate from the bundled DB to SwiftData only once
-///   and then rely solely on SwiftData going forward.
 func prepareDatabaseURL() -> URL {
   
     let fm = FileManager.default
@@ -78,14 +78,14 @@ func prepareDatabaseURL() -> URL {
     return destination
 }
 
-#if DEBUG
+
 private func legacyDBPath() -> String {
     return prepareDatabaseURL().path
 }
 
 private func userDefaultsImportKey() -> String { "LegacyImportCompleted" }
 
-/// Imports legacy flight rows from the bundled SQLite database into SwiftData (Debug only).
+/// Imports legacy flight rows from the bundled SQLite database into SwiftData.
 ///
 /// The import runs once per app installation, controlled by a `UserDefaults` flag. It opens the
 /// old SQLite database, iterates each row in the `flights` table, and creates a corresponding
@@ -157,7 +157,7 @@ func importLegacyIfNeeded(into container: ModelContainer) {
         context.insert(flight)
         imported += 1
 
-        if imported % 500 == 0 { // save in batches to reduce memory
+        if imported % 500 == 0 {
             do { try context.save() } catch { dbLog("Save failed at batch:", imported, error.localizedDescription) }
         }
     }
@@ -167,24 +167,23 @@ func importLegacyIfNeeded(into container: ModelContainer) {
     dbLog("Import completed. Imported rows:", imported)
     defaults.set(true, forKey: userDefaultsImportKey())
 }
-#endif
+
 
 /// A SwiftData model representing a single flight record.
 ///
-/// This is the core persisted entity for the app. Each instance corresponds to a row imported
-/// from the legacy database or created in-app. Properties are stored by SwiftData and can be
+/// This is the core persisted entity for the app. Each instance corresponds to a row. Properties are stored by SwiftData and can be
 /// fetched via a `ModelContext`.
 ///
 /// Properties:
 /// - `id`: Unique flight identifier (marked `@Attribute(.unique)` to prevent duplicates).
-/// - `csv_id`: Source identifier from the original CSV/import pipeline.
+/// - `csv_id`: Source identifier from the unique id in the original CSV files. Each CSV had a unique id for each of the 10.000 entries.
 /// - `depdate`: Departure date as a string (multiple formats are supported downstream).
-/// - `origin` / `destination`: Airport or location codes.
+/// - `origin` / `destination`: Airport codes.
 /// - `duration`: Flight duration (in minutes or hours depending on your dataset).
 /// - `price_eco` / `price_exec` / `price_premium`: Prices for different fare classes.
-/// - `demand`: Qualitative or quantitative indicator of demand.
-/// - `early`: Flag/counter related to early booking (domain-specific).
-/// - `population`: Population at origin/destination context (domain-specific).
+/// - `demand`: Qualitative indicator of demand.
+/// - `early`: Days early? Unsure of what it meant in the CSV. Unused data
+/// - `population`: Quantitative indicator of demand. Unused data
 /// - `airline`: Airline name.
 @Model
 final class Flights {
@@ -222,25 +221,87 @@ final class Flights {
     }
 }
 
-/// Convenience namespace for the app's persistent store configuration.
+/// Namespace for the app's persistent store configuration.
 ///
 /// - `url`: The resolved persistent store URL created by `prepareDatabaseURL()`.
 /// - `container`: A lazily-initialized `ModelContainer` configured for the `Flights` model.
-///   In Debug builds, performs a one-time import from the legacy DB.
 struct Database {
     static let url: URL = prepareDatabaseURL()
-
     static let container: ModelContainer = {
         let container = try! ModelContainer(
             for: Flights.self,
             configurations: ModelConfiguration(url: url)
         )
-        #if DEBUG
+        
         // Perform one-time import from legacy DB if needed
         importLegacyIfNeeded(into: container)
-        #endif
         return container
     }()
+    
+#if DEBUG
+    /// An in-memory SwiftData container seeded with sample flights for SwiftUI previews.
+    static var previewContainer: ModelContainer = {
+        let schema = Schema([Flights.self])
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try! ModelContainer(for: schema, configurations: [configuration])
+        let context = ModelContext(container)
+        
+        // Seed a few sample flights for previews
+        let samples: [Flights] = [
+            Flights(
+                id: 101,
+                csv_id: 1001,
+                depdate: "2025-12-01",
+                origin: "YYZ",
+                destination: "LAX",
+                duration: 310,
+                price_eco: 199,
+                price_exec: 549,
+                price_premium: 349,
+                demand: "medium",
+                early: 14,
+                population: 5000000,
+                airline: "Air Canada"
+            ),
+            Flights(
+                id: 202,
+                csv_id: 2002,
+                depdate: "2025-12-05",
+                origin: "JFK",
+                destination: "SFO",
+                duration: 360,
+                price_eco: 279,
+                price_exec: 699,
+                price_premium: 429,
+                demand: "high",
+                early: 21,
+                population: 8000000,
+                airline: "Delta"
+            ),
+            Flights(
+                id: 303,
+                csv_id: 3003,
+                depdate: "2025-12-10",
+                origin: "ORD",
+                destination: "SEA",
+                duration: 255,
+                price_eco: 159,
+                price_exec: 499,
+                price_premium: 329,
+                demand: "low",
+                early: 7,
+                population: 2700000,
+                airline: "United"
+            )
+        ]
+        
+        samples.forEach { context.insert($0) }
+        do { try context.save() } catch { dbLog("Preview seed save failed:", error.localizedDescription) }
+        
+        return container
+    }()
+#endif
+    
 }
 
 #if DEBUG

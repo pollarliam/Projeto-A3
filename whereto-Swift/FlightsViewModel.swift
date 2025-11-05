@@ -6,14 +6,13 @@
 /// - Provide derived `flights` array for the View to render.
 /// - Implement multiple sorting algorithms (educational) and apply them to current results.
 /// - Paginate and prefetch data for smooth scrolling.
-///
-/// MVVM mapping:
 /// - Model: `Flights` entities (SwiftData) and persistence setup (Model.swift).
 /// - ViewModel: This type orchestrates fetching, filtering, sorting, and paging.
 /// - View: SwiftUI views observe `@Published` properties and render UI accordingly.
 import Foundation
 import SwiftData
 import Combine
+import FoundationModels
 
 /// An observable view model that exposes flight data and UI state to SwiftUI views.
 ///
@@ -22,6 +21,9 @@ import Combine
 /// background. Views bind to `flights`, `searchText`, filter/sort selections, and `isLoading`.
 @MainActor
 final class FlightsViewModel: ObservableObject {
+    
+    
+    
     /// The field used when ordering results.
     enum SortKey: String, CaseIterable {
         case price
@@ -43,6 +45,8 @@ final class FlightsViewModel: ObservableObject {
         case quick
         case merge
     }
+    
+    
 
     /// The array of flights currently visible in the UI after applying search, filters, and sorting.
     @Published var flights: [Flights] = []
@@ -81,6 +85,7 @@ final class FlightsViewModel: ObservableObject {
     init(context: ModelContext) {
         self.context = context
     }
+    
 
     /// Loads the first page synchronously for a fast initial UI and resets pagination state.
     func load() {
@@ -115,7 +120,7 @@ final class FlightsViewModel: ObservableObject {
             nextOffset += page.count
             applyFiltersAndSorting()
         } catch {
-            print("[VM] ❌ Paged fetch failed:", error)
+            print("[VM]  Paged fetch failed:", error)
             hasMore = false
         }
         isBackgroundLoading = false
@@ -263,7 +268,7 @@ final class FlightsViewModel: ObservableObject {
         return nil
     }
 
-    /// Educational bubble sort (O(n^2)); simple but slow for large lists.
+    ///Bubble sort (O(n^2)).
     private func bubbleSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
         var a = array
         guard a.count > 1 else { return a }
@@ -280,7 +285,7 @@ final class FlightsViewModel: ObservableObject {
         return a
     }
 
-    /// Educational selection sort (O(n^2)); minimal swaps but still quadratic.
+    /// Selection sort (O(n^2))
     private func selectionSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
         var a = array
         for i in 0..<a.count {
@@ -295,7 +300,7 @@ final class FlightsViewModel: ObservableObject {
         return a
     }
 
-    /// Educational insertion sort (O(n^2)); efficient for nearly-sorted input.
+    ///Insertion sort (O(n^2))
     private func insertionSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
         var a = array
         for i in 1..<a.count {
@@ -310,7 +315,7 @@ final class FlightsViewModel: ObservableObject {
         return a
     }
 
-    /// Educational quick sort (average O(n log n)); in-place; worst-case quadratic.
+    /// Quick sort (average O(n log n)).
     private func quickSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
         var a = array
         func qs(_ low: Int, _ high: Int) {
@@ -335,7 +340,7 @@ final class FlightsViewModel: ObservableObject {
         return a
     }
 
-    /// Educational merge sort (O(n log n)); stable; uses extra memory during merges.
+    ///Merge sort (O(n log n)). uses extra memory.
     private func mergeSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
         func ms(_ a: [Flights]) -> [Flights] {
             guard a.count > 1 else { return a }
@@ -361,4 +366,8 @@ final class FlightsViewModel: ObservableObject {
         }
         return ms(array)
     }
+    
+    
+    
+    
 }
