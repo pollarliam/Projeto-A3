@@ -1,0 +1,10 @@
+[
+  {
+    "label": "Compile and Run Swift (Windows)",
+    "command": "swiftc \"$env:ZED_FILE\" -o \"$env:ZED_STEM.exe\"; & \".\\$env:ZED_STEM.exe\"",
+    "shell": "system",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  }
+]
