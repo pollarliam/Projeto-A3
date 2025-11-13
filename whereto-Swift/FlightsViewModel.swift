@@ -22,8 +22,6 @@ import FoundationModels
 @MainActor
 final class FlightsViewModel: ObservableObject {
     
-    
-    
     /// The field used when ordering results.
     enum SortKey: String, CaseIterable {
         case price
@@ -46,14 +44,16 @@ final class FlightsViewModel: ObservableObject {
         case merge
     }
     
-    
+    // Async pipeline control
+    private var computeTask: Task<Void, Never>? = nil
+    private var searchDebounceTask: Task<Void, Never>? = nil
 
     /// The array of flights currently visible in the UI after applying search, filters, and sorting.
     @Published var flights: [Flights] = []
     /// Free‑text search applied to origin, destination, and airline fields.
     /// Triggers the filter pipeline on change.
     @Published var searchText: String = "" {
-        didSet { applyFiltersAndSorting() }
+        didSet { scheduleDebouncedRecompute() }
     }
     /// True while the initial page is loading. Background prefetching is tracked separately.
     @Published var isLoading: Bool = false
@@ -85,7 +85,22 @@ final class FlightsViewModel: ObservableObject {
     init(context: ModelContext) {
         self.context = context
     }
-    
+
+    /// Debounce search changes to avoid recomputing on every keystroke.
+    private func scheduleDebouncedRecompute() {
+        // Cancel any pending debounce
+        searchDebounceTask?.cancel()
+        let expected = searchText
+        searchDebounceTask = Task { [weak self] in
+            // ~250ms debounce window
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, let self else { return }
+            // Only recompute if the text hasn't changed during the debounce
+            if expected == self.searchText {
+                self.applyFiltersAndSorting()
+            }
+        }
+    }
 
     /// Loads the first page synchronously for a fast initial UI and resets pagination state.
     func load() {
@@ -143,86 +158,222 @@ final class FlightsViewModel: ObservableObject {
     /// 5. Sort using the chosen `sortAlgorithm`.
     /// 6. Publish the result to `flights` and trigger background prefetch if appropriate.
     private func applyFiltersAndSorting() {
-        // Start from all flights
-        var result = allFlights
+        // Cancel any in-flight computation; only the latest state should win
+        computeTask?.cancel()
 
-        // Text search (origin, destination, airline)
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            let lower = trimmed.lowercased()
-            result = result.filter { flight in
-                flight.origin.lowercased().contains(lower) ||
-                flight.destination.lowercased().contains(lower) ||
-                flight.airline.lowercased().contains(lower)
-            }
-        }
+        // Snapshot current state to use off the main actor
+        let snapshotAll = allFlights
+        let snapshotSearch = searchText
+        let snapshotMin = minPrice
+        let snapshotMax = maxPrice
+        let snapshotOrigin = originFilter
+        let snapshotDest = destinationFilter
+        let snapshotStart = dateStart
+        let snapshotEnd = dateEnd
+        let snapshotKey = sortKey
+        let snapshotOrder = sortOrder
+        let snapshotAlgo = sortAlgorithm
 
-        // Additional field filters
-        if let min = minPrice {
-            result = result.filter { $0.price_eco >= min }
-        }
-        if let max = maxPrice {
-            result = result.filter { $0.price_eco <= max }
-        }
-        if !originFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let lower = originFilter.lowercased()
-            result = result.filter { $0.origin.lowercased().contains(lower) }
-        }
-        if !destinationFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let lower = destinationFilter.lowercased()
-            result = result.filter { $0.destination.lowercased().contains(lower) }
-        }
-        if dateStart != nil || dateEnd != nil {
-            result = result.filter { flight in
-                guard let date = parseDate(flight.depdate) else { return false }
-                if let start = dateStart, date < start { return false }
-                if let end = dateEnd, date > end { return false }
-                return true
-            }
-        }
+        computeTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
 
-        // Sorting using selected algorithm and order
-        let comparator: (Flights, Flights) -> Bool = { a, b in
-            let ascending = (self.sortOrder == .ascending)
-            switch self.sortKey {
-            case .price:
-                return ascending ? (a.price_eco < b.price_eco) : (a.price_eco > b.price_eco)
-            case .date:
-                let da = self.parseDate(a.depdate)
-                let db = self.parseDate(b.depdate)
-                switch (da, db) {
-                case let (l?, r?):
-                    return ascending ? (l < r) : (l > r)
-                case (nil, nil):
-                    return false
-                case (nil, _):
-                    return !ascending // nils last for ascending
-                case (_, nil):
-                    return ascending
+            // Local helpers to keep this task pure and off the main actor
+            func parseDate(_ string: String) -> Date? {
+                let fmts = [
+                    "yyyy-MM-dd",
+                    "yyyy/MM/dd",
+                    "dd/MM/yyyy",
+                    "MM/dd/yyyy",
+                    "dd-MM-yyyy",
+                    "MM-dd-yyyy",
+                    "yyyy-MM-dd'T'HH:mm:ssZ",
+                    "yyyy-MM-dd HH:mm:ss"
+                ]
+                let df = DateFormatter()
+                df.locale = Locale(identifier: "en_US_POSIX")
+                for f in fmts {
+                    df.dateFormat = f
+                    if let d = df.date(from: string) { return d }
                 }
-            case .duration:
-                return ascending ? (a.duration < b.duration) : (a.duration > b.duration)
+                return nil
+            }
+
+            // Build filtered list
+            var result = snapshotAll
+
+            let trimmed = snapshotSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                let lower = trimmed.lowercased()
+                result = result.filter { flight in
+                    flight.origin.lowercased().contains(lower) ||
+                    flight.destination.lowercased().contains(lower) ||
+                    flight.airline.lowercased().contains(lower)
+                }
+            }
+
+            if let min = snapshotMin {
+                result = result.filter { $0.price_eco >= min }
+            }
+            if let max = snapshotMax {
+                result = result.filter { $0.price_eco <= max }
+            }
+            if !snapshotOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let lower = snapshotOrigin.lowercased()
+                result = result.filter { $0.origin.lowercased().contains(lower) }
+            }
+            if !snapshotDest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let lower = snapshotDest.lowercased()
+                result = result.filter { $0.destination.lowercased().contains(lower) }
+            }
+            if snapshotStart != nil || snapshotEnd != nil {
+                result = result.filter { flight in
+                    guard let date = parseDate(flight.depdate) else { return false }
+                    if let start = snapshotStart, date < start { return false }
+                    if let end = snapshotEnd, date > end { return false }
+                    return true
+                }
+            }
+
+            // Build comparator
+            let comparator: (Flights, Flights) -> Bool = { a, b in
+                let ascending = (snapshotOrder == .ascending)
+                switch snapshotKey {
+                case .price:
+                    return ascending ? (a.price_eco < b.price_eco) : (a.price_eco > b.price_eco)
+                case .date:
+                    let da = parseDate(a.depdate)
+                    let db = parseDate(b.depdate)
+                    switch (da, db) {
+                    case let (l?, r?):
+                        return ascending ? (l < r) : (l > r)
+                    case (nil, nil):
+                        return false
+                    case (nil, _):
+                        return !ascending
+                    case (_, nil):
+                        return ascending
+                    }
+                case .duration:
+                    return ascending ? (a.duration < b.duration) : (a.duration > b.duration)
+                }
+            }
+
+            // Sorting algorithms (pure, local copies)
+            func bubbleSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
+                var a = array
+                guard a.count > 1 else { return a }
+                var swapped: Bool
+                repeat {
+                    swapped = false
+                    for i in 1..<a.count {
+                        if !areInIncreasingOrder(a[i - 1], a[i]) {
+                            a.swapAt(i - 1, i)
+                            swapped = true
+                        }
+                    }
+                } while swapped
+                return a
+            }
+
+            func selectionSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
+                var a = array
+                for i in 0..<a.count {
+                    var minIndex = i
+                    for j in (i + 1)..<a.count {
+                        if areInIncreasingOrder(a[j], a[minIndex]) {
+                            minIndex = j
+                        }
+                    }
+                    if i != minIndex { a.swapAt(i, minIndex) }
+                }
+                return a
+            }
+
+            func insertionSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
+                var a = array
+                for i in 1..<a.count {
+                    var j = i
+                    let key = a[j]
+                    while j > 0 && areInIncreasingOrder(key, a[j - 1]) == true {
+                        a[j] = a[j - 1]
+                        j -= 1
+                    }
+                    a[j] = key
+                }
+                return a
+            }
+
+            func quickSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
+                var a = array
+                func qs(_ low: Int, _ high: Int) {
+                    if low >= high { return }
+                    let p = partition(&a, low, high)
+                    qs(low, p - 1)
+                    qs(p + 1, high)
+                }
+                func partition(_ a: inout [Flights], _ low: Int, _ high: Int) -> Int {
+                    let pivot = a[high]
+                    var i = low
+                    for j in low..<high {
+                        if areInIncreasingOrder(a[j], pivot) {
+                            a.swapAt(i, j)
+                            i += 1
+                        }
+                    }
+                    a.swapAt(i, high)
+                    return i
+                }
+                if a.count > 1 { qs(0, a.count - 1) }
+                return a
+            }
+
+            func mergeSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
+                func ms(_ a: [Flights]) -> [Flights] {
+                    guard a.count > 1 else { return a }
+                    let mid = a.count / 2
+                    let left = ms(Array(a[..<mid]))
+                    let right = ms(Array(a[mid...]))
+                    return merge(left, right)
+                }
+                func merge(_ left: [Flights], _ right: [Flights]) -> [Flights] {
+                    var i = 0, j = 0
+                    var out: [Flights] = []
+                    out.reserveCapacity(left.count + right.count)
+                    while i < left.count && j < right.count {
+                        if areInIncreasingOrder(left[i], right[j]) {
+                            out.append(left[i]); i += 1
+                        } else {
+                            out.append(right[j]); j += 1
+                        }
+                    }
+                    if i < left.count { out.append(contentsOf: left[i...]) }
+                    if j < right.count { out.append(contentsOf: right[j...]) }
+                    return out
+                }
+                return ms(array)
+            }
+
+            // Apply chosen algorithm
+            switch snapshotAlgo {
+            case .bubble:
+                result = bubbleSort(result, by: comparator)
+            case .selection:
+                result = selectionSort(result, by: comparator)
+            case .insertion:
+                result = insertionSort(result, by: comparator)
+            case .quick:
+                result = quickSort(result, by: comparator)
+            case .merge:
+                result = mergeSort(result, by: comparator)
+            }
+
+            // Publish back on the main actor (if not cancelled)
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                self.flights = result
+                self.maybePrefetchMore()
             }
         }
-
-        // Apply chosen algorithm
-        switch sortAlgorithm {
-        case .bubble:
-            result = bubbleSort(result, by: comparator)
-        case .selection:
-            result = selectionSort(result, by: comparator)
-        case .insertion:
-            result = insertionSort(result, by: comparator)
-        case .quick:
-            result = quickSort(result, by: comparator)
-        case .merge:
-            result = mergeSort(result, by: comparator)
-        }
-
-        flights = result
-
-        // Continue background prefetch if applicable
-        maybePrefetchMore()
     }
 
     /// Triggers loading of the next page when the UI approaches the end of the current list.

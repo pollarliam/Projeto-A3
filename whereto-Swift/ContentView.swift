@@ -2,6 +2,7 @@ import SwiftUI
 import MapKit
 import SwiftData
 
+
 /// Root SwiftUI view that reads the `ModelContext` from the environment and passes it to
 /// `MainContentView`, where the `FlightsViewModel` is created.
 struct MainView: View {
@@ -94,6 +95,7 @@ private struct MainContentView: View {
             sidebarList //sidebar
         } detail: {
             globeView // mapa
+     
         }
     }
 
@@ -180,14 +182,7 @@ private struct MainContentView: View {
             }
         }
         .task {
-            #if DEBUG
-            let isPreview = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
-            if !isPreview {
                 viewModel.load()
-            }
-            #else
-            viewModel.load()
-            #endif
         }
     }
 
@@ -274,7 +269,7 @@ private struct FlightCardView: View {
                 Text(code)
                     .font(.headline)
                 Spacer()
-                Text(price, format: .currency(code: Locale.current.currency?.identifier ?? "USD"))
+                Text(price, format: .currency(code: "R$"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -296,7 +291,7 @@ private struct FlightCardView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(.quaternary, lineWidth: 1)
         )
-        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+        
     }
 }
 
