@@ -33,6 +33,7 @@ private struct MainContentView: View {
     )
     @State private var selectedFlight: Flights?
     @State private var resolvedPins: [FoundAirport] = []
+    @State private var showBenchmarkSheet: Bool = false
 
     private struct FoundAirport: Identifiable {
         let id = UUID()
@@ -87,6 +88,7 @@ private struct MainContentView: View {
     init(context: ModelContext) {
         let vm = FlightsViewModel(context: context)
         _viewModel = StateObject(wrappedValue: vm)
+        FlightsViewModelRegistry.shared.current = vm
     }
     
     ///sidebar com mapa
@@ -95,7 +97,6 @@ private struct MainContentView: View {
             sidebarList //sidebar
         } detail: {
             globeView // mapa
-     
         }
     }
 
@@ -145,7 +146,6 @@ private struct MainContentView: View {
                 }
                 
                     Picker("Algorithm", selection: $viewModel.sortAlgorithm) {
-                        Text("Bubble").tag(FlightsViewModel.SortAlgorithm.bubble)
                         Text("Selection").tag(FlightsViewModel.SortAlgorithm.selection)
                         Text("Insertion").tag(FlightsViewModel.SortAlgorithm.insertion)
                         Text("Quick").tag(FlightsViewModel.SortAlgorithm.quick)
@@ -167,6 +167,10 @@ private struct MainContentView: View {
                         viewModel.dateStart = nil
                         viewModel.dateEnd = nil
                     }
+                    Divider()
+                    Button("Algorithmic Search…") {
+                        showBenchmarkSheet = true
+                    }
                 }
             } label: {
                 Label("Filter", systemImage: "line.3.horizontal.decrease",)
@@ -183,6 +187,9 @@ private struct MainContentView: View {
         }
         .task {
                 viewModel.load()
+        }
+        .sheet(isPresented: $showBenchmarkSheet) {
+            AlgorithmicSearchView(viewModel: viewModel)
         }
     }
 
@@ -315,6 +322,62 @@ private struct SearchBarView: View {
         }
         .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 4, trailing: 12))
         .listRowBackground(Color.clear)
+    }
+}
+
+private struct AlgorithmicSearchView: View {
+    @ObservedObject var viewModel: FlightsViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Algorithmic Search Benchmarks")
+                .font(.headline)
+
+            TextField("Benchmark query", text: $viewModel.benchmarkQuery)
+                .textFieldStyle(.roundedBorder)
+
+            Picker("Key", selection: $viewModel.searchKey) {
+                Text("ID").tag(FlightsViewModel.SearchKey.id)
+                Text("Origin").tag(FlightsViewModel.SearchKey.origin)
+                Text("Destination").tag(FlightsViewModel.SearchKey.destination)
+                Text("Airline").tag(FlightsViewModel.SearchKey.airline)
+                Text("Price").tag(FlightsViewModel.SearchKey.price)
+            }
+
+            Picker("Algorithm", selection: $viewModel.searchAlgorithm) {
+                Text("Linear").tag(FlightsViewModel.SearchAlgorithm.linear)
+                Text("Binary").tag(FlightsViewModel.SearchAlgorithm.binary)
+                Text("Hash").tag(FlightsViewModel.SearchAlgorithm.hash)
+            }
+
+            HStack {
+                Button("Run Selected") {
+                    viewModel.executeSearch(query: viewModel.benchmarkQuery)
+                }
+                Button("Run All") {
+                    viewModel.runSearchBenchmarks()
+                }
+                Spacer()
+                Button("Close") { dismiss() }
+            }
+            Divider()
+            if viewModel.benchmarkResults.isEmpty {
+                Text("No results yet. Run a search to see matches.")
+                    .foregroundStyle(.secondary)
+            } else {
+                List(viewModel.benchmarkResults, id: \.persistentModelID) { flight in
+                    let code: String = "\(flight.airline) \(flight.id)"
+                    let route: String = "\(flight.origin) → \(flight.destination)"
+                    let price: Double = flight.price_eco
+                    let dep: String = flight.depdate
+                    FlightCardView(code: code, route: route, price: price, dep: dep)
+                }
+                .frame(minHeight: 200)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 420)
     }
 }
 

@@ -39,6 +39,14 @@ struct whereto_SwiftApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .modelContainer(sharedModelContainer)
+
+        Window("Run History", id: "RunHistory") {
+            RunHistoryView()
+        }
+        .modelContainer(sharedModelContainer)
+
+        .commands {
+            DetailsCommands()
+        }
     }
 }
-

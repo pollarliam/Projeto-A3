@@ -44,6 +44,22 @@ final class FlightsViewModel: ObservableObject {
         case merge
     }
     
+    /// The field used when searching.
+    enum SearchKey: String, CaseIterable {
+        case id
+        case origin
+        case destination
+        case airline
+        case price
+    }
+
+    /// The algorithm used to search results.
+    enum SearchAlgorithm: String, CaseIterable {
+        case linear
+        case binary
+        case hash
+    }
+    
     // Async pipeline control
     private var computeTask: Task<Void, Never>? = nil
     private var searchDebounceTask: Task<Void, Never>? = nil
@@ -62,6 +78,12 @@ final class FlightsViewModel: ObservableObject {
     @Published var sortKey: SortKey = .price { didSet { applyFiltersAndSorting() } }
     @Published var sortOrder: SortOrder = .ascending { didSet { applyFiltersAndSorting() } }
     @Published var sortAlgorithm: SortAlgorithm = .merge { didSet { applyFiltersAndSorting() } }
+    
+    @Published var searchAlgorithm: SearchAlgorithm = .linear
+    @Published var searchKey: SearchKey = .origin
+    
+    /// Hidden project input: algorithmic search query (does not affect normal UI search)
+    @Published var benchmarkQuery: String = ""
 
     /// Additional filters applied to the full dataset before sorting.
     @Published var minPrice: Double? { didSet { applyFiltersAndSorting() } }
@@ -80,6 +102,30 @@ final class FlightsViewModel: ObservableObject {
     private var nextOffset: Int = 0
     private var hasMore: Bool = true
     private var isBackgroundLoading: Bool = false
+
+    // Performance run tracking
+    struct RunRecord: Identifiable {
+        let id: Int
+        let sortKey: SortKey
+        let sortOrder: SortOrder
+        let algorithm: SortAlgorithm
+        let durationSeconds: Double
+    }
+    @Published private(set) var runHistory: [RunRecord] = []
+    private var runCounter: Int = 0
+
+    struct SearchRunRecord: Identifiable {
+        let id: Int
+        let query: String
+        let key: SearchKey
+        let algorithm: SearchAlgorithm
+        let matches: Int
+        let durationSeconds: Double
+    }
+    @Published private(set) var searchRunHistory: [SearchRunRecord] = []
+    @Published private(set) var benchmarkResults: [Flights] = []
+
+    private var searchRunCounter: Int = 0
 
     /// Creates a view model bound to the given `ModelContext`.
     init(context: ModelContext) {
@@ -146,6 +192,200 @@ final class FlightsViewModel: ObservableObject {
     private func applySearch() {
         // Backward compatibility: delegate to the unified pipeline
         applyFiltersAndSorting()
+    }
+
+    /// Executes a search over the loaded dataset using the selected `searchAlgorithm` and `searchKey`.
+    /// It records timing and prints the run to the console. This does not mutate `flights`.
+    func executeSearch(query: String) {
+        let snapshotAll = allFlights
+        let algo = searchAlgorithm
+        let key = searchKey
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+
+            func accessor(_ f: Flights) -> String {
+                switch key {
+                case .id: return String(f.id)
+                case .origin: return f.origin
+                case .destination: return f.destination
+                case .airline: return f.airline
+                case .price: return String(format: "%.2f", f.price_eco)
+                }
+            }
+
+            var matches: [Flights] = []
+            let clock = ContinuousClock()
+            let start = clock.now
+            switch algo {
+            case .linear:
+                let lower = q.lowercased()
+                matches = snapshotAll.filter { accessor($0).lowercased().contains(lower) }
+            case .binary:
+                // Binary search requires sorted data by the chosen key; prepare a sorted copy of keys with indices
+                let pairs = snapshotAll.enumerated().map { (idx, f) in (idx, accessor(f)) }
+                let sorted = pairs.sorted { $0.1.localizedCaseInsensitiveCompare($1.1) == .orderedAscending }
+                // Find the first match using binary search on the key string, then expand neighbors with the same prefix/substring
+                let keyToFind = q.lowercased()
+                var lo = 0, hi = sorted.count - 1
+                var foundIndex: Int? = nil
+                while lo <= hi {
+                    let mid = (lo + hi) / 2
+                    let val = sorted[mid].1.lowercased()
+                    if val == keyToFind || val.contains(keyToFind) {
+                        foundIndex = mid; break
+                    } else if val < keyToFind {
+                        lo = mid + 1
+                    } else {
+                        hi = mid - 1
+                    }
+                }
+                if let fi = foundIndex {
+                    // expand left and right collecting matches that contain the query
+                    var i = fi
+                    while i >= 0 {
+                        let val = sorted[i].1.lowercased()
+                        if val.contains(keyToFind) { matches.append(snapshotAll[sorted[i].0]); i -= 1 } else { break }
+                    }
+                    i = fi + 1
+                    while i < sorted.count {
+                        let val = sorted[i].1.lowercased()
+                        if val.contains(keyToFind) { matches.append(snapshotAll[sorted[i].0]); i += 1 } else { break }
+                    }
+                }
+            case .hash:
+                // Build a hash map depending on the field
+                switch key {
+                case .id:
+                    let dict = Dictionary(grouping: snapshotAll, by: { String($0.id) })
+                    matches = dict[q] ?? []
+                case .origin:
+                    let dict = Dictionary(grouping: snapshotAll, by: { $0.origin.lowercased() })
+                    matches = dict[q.lowercased()] ?? []
+                case .destination:
+                    let dict = Dictionary(grouping: snapshotAll, by: { $0.destination.lowercased() })
+                    matches = dict[q.lowercased()] ?? []
+                case .airline:
+                    let dict = Dictionary(grouping: snapshotAll, by: { $0.airline.lowercased() })
+                    matches = dict[q.lowercased()] ?? []
+                case .price:
+                    let dict = Dictionary(grouping: snapshotAll, by: { String(format: "%.2f", $0.price_eco) })
+                    matches = dict[String(format: "%.2f", Double(q) ?? -1)] ?? []
+                }
+            }
+            let duration = start.duration(to: clock.now)
+            let seconds = Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1_000_000_000_000_000_000.0
+
+            await MainActor.run {
+                self.benchmarkResults = matches
+                self.searchRunCounter += 1
+                let record = SearchRunRecord(id: self.searchRunCounter,
+                                             query: q,
+                                             key: key,
+                                             algorithm: algo,
+                                             matches: matches.count,
+                                             durationSeconds: seconds)
+                self.searchRunHistory.append(record)
+                let timeStr = String(format: "%.5f", record.durationSeconds)
+                print("[SearchMetrics] run\(record.id): key=\(key.rawValue), algo=\(algo.rawValue), query=\(q), matches=\(record.matches), time=\(timeStr)s")
+            }
+        }
+    }
+    
+    /// Runs all search algorithms for the current `searchKey` using `benchmarkQuery`.
+    /// This is used to benchmark algorithms without affecting the main UI search.
+    func runSearchBenchmarks() {
+        let q = benchmarkQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        let dataset = allFlights
+        let key = searchKey
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+
+            func accessor(_ f: Flights) -> String {
+                switch key {
+                case .id: return String(f.id)
+                case .origin: return f.origin
+                case .destination: return f.destination
+                case .airline: return f.airline
+                case .price: return String(format: "%.2f", f.price_eco)
+                }
+            }
+
+            for algo in SearchAlgorithm.allCases {
+                var matches: [Flights] = []
+                let clock = ContinuousClock()
+                let start = clock.now
+                switch algo {
+                case .linear:
+                    let lower = q.lowercased()
+                    matches = dataset.filter { accessor($0).lowercased().contains(lower) }
+                case .binary:
+                    let pairs = dataset.enumerated().map { (idx, f) in (idx, accessor(f)) }
+                    let sorted = pairs.sorted { $0.1.localizedCaseInsensitiveCompare($1.1) == .orderedAscending }
+                    let keyToFind = q.lowercased()
+                    if !sorted.isEmpty {
+                        var lo = 0, hi = sorted.count - 1
+                        var foundIndex: Int? = nil
+                        while lo <= hi {
+                            let mid = (lo + hi) / 2
+                            let val = sorted[mid].1.lowercased()
+                            if val == keyToFind || val.contains(keyToFind) { foundIndex = mid; break }
+                            else if val < keyToFind { lo = mid + 1 }
+                            else { hi = mid - 1 }
+                        }
+                        if let fi = foundIndex {
+                            var i = fi
+                            while i >= 0 {
+                                let val = sorted[i].1.lowercased()
+                                if val.contains(keyToFind) { matches.append(dataset[sorted[i].0]); i -= 1 } else { break }
+                            }
+                            i = fi + 1
+                            while i < sorted.count {
+                                let val = sorted[i].1.lowercased()
+                                if val.contains(keyToFind) { matches.append(dataset[sorted[i].0]); i += 1 } else { break }
+                            }
+                        }
+                    }
+                case .hash:
+                    switch key {
+                    case .id:
+                        let dict = Dictionary(grouping: dataset, by: { String($0.id) })
+                        matches = dict[q] ?? []
+                    case .origin:
+                        let dict = Dictionary(grouping: dataset, by: { $0.origin.lowercased() })
+                        matches = dict[q.lowercased()] ?? []
+                    case .destination:
+                        let dict = Dictionary(grouping: dataset, by: { $0.destination.lowercased() })
+                        matches = dict[q.lowercased()] ?? []
+                    case .airline:
+                        let dict = Dictionary(grouping: dataset, by: { $0.airline.lowercased() })
+                        matches = dict[q.lowercased()] ?? []
+                    case .price:
+                        let dict = Dictionary(grouping: dataset, by: { String(format: "%.2f", $0.price_eco) })
+                        matches = dict[String(format: "%.2f", Double(q) ?? -1)] ?? []
+                    }
+                }
+                let duration = start.duration(to: ContinuousClock().now)
+                let seconds = Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1_000_000_000_000_000_000.0
+
+                await MainActor.run {
+                    self.searchRunCounter += 1
+                    let record = SearchRunRecord(id: self.searchRunCounter,
+                                                 query: q,
+                                                 key: key,
+                                                 algorithm: algo,
+                                                 matches: matches.count,
+                                                 durationSeconds: seconds)
+                    self.searchRunHistory.append(record)
+                    let timeStr = String(format: "%.5f", record.durationSeconds)
+                    print("[SearchMetrics] run\(record.id): key=\(key.rawValue), algo=\(algo.rawValue), query=\(q), matches=\(record.matches), time=\(timeStr)s")
+                }
+            }
+        }
     }
 
     /// Recomputes the visible `flights` by applying search, field filters, and selected sorting.
@@ -258,120 +498,50 @@ final class FlightsViewModel: ObservableObject {
                 }
             }
 
-            // Sorting algorithms (pure, local copies)
-            func bubbleSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
-                var a = array
-                guard a.count > 1 else { return a }
-                var swapped: Bool
-                repeat {
-                    swapped = false
-                    for i in 1..<a.count {
-                        if !areInIncreasingOrder(a[i - 1], a[i]) {
-                            a.swapAt(i - 1, i)
-                            swapped = true
-                        }
-                    }
-                } while swapped
-                return a
-            }
-
-            func selectionSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
-                var a = array
-                for i in 0..<a.count {
-                    var minIndex = i
-                    for j in (i + 1)..<a.count {
-                        if areInIncreasingOrder(a[j], a[minIndex]) {
-                            minIndex = j
-                        }
-                    }
-                    if i != minIndex { a.swapAt(i, minIndex) }
-                }
-                return a
-            }
-
-            func insertionSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
-                var a = array
-                for i in 1..<a.count {
-                    var j = i
-                    let key = a[j]
-                    while j > 0 && areInIncreasingOrder(key, a[j - 1]) == true {
-                        a[j] = a[j - 1]
-                        j -= 1
-                    }
-                    a[j] = key
-                }
-                return a
-            }
-
-            func quickSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
-                var a = array
-                func qs(_ low: Int, _ high: Int) {
-                    if low >= high { return }
-                    let p = partition(&a, low, high)
-                    qs(low, p - 1)
-                    qs(p + 1, high)
-                }
-                func partition(_ a: inout [Flights], _ low: Int, _ high: Int) -> Int {
-                    let pivot = a[high]
-                    var i = low
-                    for j in low..<high {
-                        if areInIncreasingOrder(a[j], pivot) {
-                            a.swapAt(i, j)
-                            i += 1
-                        }
-                    }
-                    a.swapAt(i, high)
-                    return i
-                }
-                if a.count > 1 { qs(0, a.count - 1) }
-                return a
-            }
-
-            func mergeSort(_ array: [Flights], by areInIncreasingOrder: (Flights, Flights) -> Bool) -> [Flights] {
-                func ms(_ a: [Flights]) -> [Flights] {
-                    guard a.count > 1 else { return a }
-                    let mid = a.count / 2
-                    let left = ms(Array(a[..<mid]))
-                    let right = ms(Array(a[mid...]))
-                    return merge(left, right)
-                }
-                func merge(_ left: [Flights], _ right: [Flights]) -> [Flights] {
-                    var i = 0, j = 0
-                    var out: [Flights] = []
-                    out.reserveCapacity(left.count + right.count)
-                    while i < left.count && j < right.count {
-                        if areInIncreasingOrder(left[i], right[j]) {
-                            out.append(left[i]); i += 1
-                        } else {
-                            out.append(right[j]); j += 1
-                        }
-                    }
-                    if i < left.count { out.append(contentsOf: left[i...]) }
-                    if j < right.count { out.append(contentsOf: right[j...]) }
-                    return out
-                }
-                return ms(array)
-            }
-
-            // Apply chosen algorithm
+            // Apply chosen algorithm with timing
+            let clock = ContinuousClock()
+            let start = clock.now
             switch snapshotAlgo {
             case .bubble:
-                result = bubbleSort(result, by: comparator)
+                result = await bubbleSort(result, by: comparator)
             case .selection:
-                result = selectionSort(result, by: comparator)
+                result = await selectionSort(result, by: comparator)
             case .insertion:
-                result = insertionSort(result, by: comparator)
+                result = await insertionSort(result, by: comparator)
             case .quick:
-                result = quickSort(result, by: comparator)
+                result = await quickSort(result, by: comparator)
             case .merge:
-                result = mergeSort(result, by: comparator)
+                result = await mergeSort(result, by: comparator)
             }
+            let duration = start.duration(to: clock.now)
+            let seconds = Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1_000_000_000_000_000_000.0
+
+            let runSeconds = seconds
+            let runKey = snapshotKey
+            let runOrder = snapshotOrder
+            let runAlgo = snapshotAlgo
 
             // Publish back on the main actor (if not cancelled)
             await MainActor.run {
                 guard !Task.isCancelled else { return }
                 self.flights = result
                 self.maybePrefetchMore()
+
+                // Record and print performance run
+                self.runCounter += 1
+                let record = RunRecord(
+                    id: self.runCounter,
+                    sortKey: runKey,
+                    sortOrder: runOrder,
+                    algorithm: runAlgo,
+                    durationSeconds: runSeconds
+                )
+                self.runHistory.append(record)
+                let keyStr = record.sortKey.rawValue
+                let orderStr = record.sortOrder.rawValue
+                let algoStr = record.algorithm.rawValue
+                let timeStr = String(format: "%.5f", record.durationSeconds)
+                print("[SortMetrics] run\(record.id): key=\(keyStr), order=\(orderStr), algo=\(algoStr), time=\(timeStr)s")
             }
         }
     }
@@ -522,3 +692,6 @@ final class FlightsViewModel: ObservableObject {
     
     
 }
+
+
+
