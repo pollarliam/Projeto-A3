@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import SwiftData
+import FoundationModels
 
 
 /// Root SwiftUI view that reads the `ModelContext` from the environment and passes it to
@@ -34,6 +35,16 @@ private struct MainContentView: View {
     @State private var selectedFlight: Flights?
     @State private var resolvedPins: [FoundAirport] = []
     @State private var showBenchmarkSheet: Bool = false
+    @State private var routeCoordinates: [CLLocationCoordinate2D] = []
+
+    @State private var destinationPin: FoundAirport? = nil
+    @State private var destinationSummary: String? = nil
+    @State private var isSummarizingDestination: Bool = false
+
+    @State private var initialFilters: FiltersSnapshot? = nil
+    @State private var lastFailedQuery: String? = nil
+    @State private var lastErrorDescription: String? = nil
+    @State private var errorBanner: String? = nil
 
     private struct FoundAirport: Identifiable {
         let id = UUID()
@@ -46,43 +57,49 @@ private struct MainContentView: View {
         static let shared = AirportSearchService()
         private var cache: [String: FoundAirport] = [:]
 
+        /// Resolves an IATA code to a known airport from our bundled JSON.
+        /// Ignores `biasRegion` (kept for call-site compatibility).
         func resolve(code rawCode: String, biasRegion: MKCoordinateRegion? = nil) async -> FoundAirport? {
             let code = rawCode.uppercased()
             if let cached = cache[code] { return cached }
 
-            if let result = await search(query: "\(code) airport", biasRegion: biasRegion, code: code) {
-                cache[code] = result
-                return result
-            }
-            if let result = await search(query: code, biasRegion: biasRegion, code: code) {
+            if let a = AirportDirectory.shared.airport(forCode: code) {
+                let name = a.name ?? a.city
+                let result = FoundAirport(code: code, name: name, coordinate: a.coordinate)
                 cache[code] = result
                 return result
             }
             return nil
         }
+    }
 
-        private func search(query: String, biasRegion: MKCoordinateRegion?, code: String) async -> FoundAirport? {
-            let request = MKLocalSearch.Request()
-            request.naturalLanguageQuery = query
-            if let biasRegion { request.region = biasRegion }
-            let search = MKLocalSearch(request: request)
-            do {
-                let response = try await search.start()
-                let items = response.mapItems
-                if let airportItem = items.first(where: { $0.pointOfInterestCategory == .airport }) {
-                    return FoundAirport(code: code, name: airportItem.name ?? code, coordinate: airportItem.placemark.coordinate)
-                }
-                if let nameMatch = items.first(where: { ($0.name ?? "").localizedCaseInsensitiveContains(code) || ($0.name ?? "").localizedCaseInsensitiveContains("airport") }) {
-                    return FoundAirport(code: code, name: nameMatch.name ?? code, coordinate: nameMatch.placemark.coordinate)
-                }
-                if let first = items.first {
-                    return FoundAirport(code: code, name: first.name ?? code, coordinate: first.placemark.coordinate)
-                }
-            } catch {
-                // ignore and return nil
-            }
-            return nil
+    private struct FiltersSnapshot {
+        var searchText: String
+        var origin: String
+        var destination: String
+        var minPrice: Double?
+        var maxPrice: Double?
+        var dateStart: Date?
+        var dateEnd: Date?
+        var sortKey: FlightsViewModel.SortKey
+        var sortOrder: FlightsViewModel.SortOrder
+    }
+    
+    private func codesForInput(_ input: String) -> [String] {
+        let dir = AirportDirectory.shared
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return [] }
+        let upper = trimmed.uppercased()
+        if upper.count == 3, dir.airport(forCode: upper) != nil {
+            return [upper]
         }
+        // Exact city match first
+        let cityMatches = dir.airports(inCity: trimmed)
+        if !cityMatches.isEmpty { return cityMatches.map { $0.code } }
+        // Fallback: fuzzy search across name/city/code
+        let results = dir.searchAirports(matching: trimmed, limit: 5)
+        if !results.isEmpty { return results.map { $0.code } }
+        return []
     }
 
     init(context: ModelContext) {
@@ -119,7 +136,10 @@ private struct MainContentView: View {
                     .contentShape(Rectangle())
                     .onTapGesture {
                         selectedFlight = flight
-                        Task { await resolvePinsForSelectedFlight() }
+                        Task {
+                            await resolvePinsForSelectedFlight()
+                            await summarizeForSelectedFlight()
+                        }
                     }
                     .onAppear {
                         viewModel.loadMoreIfNeeded(currentItem: flight)
@@ -129,7 +149,7 @@ private struct MainContentView: View {
             .listSectionSeparator(.hidden)
             .listRowBackground(Color.clear)
         }
-        .searchable(text: $viewModel.searchText, placement: .sidebar, prompt: "Where to?")
+        .transaction { $0.animation = nil }
         .frame(minWidth: 280)
         .toolbar {
             Menu {
@@ -176,17 +196,70 @@ private struct MainContentView: View {
                 Label("Filter", systemImage: "line.3.horizontal.decrease",)
             }
         }
+        .searchable(text: $viewModel.searchText, placement: .sidebar)
         .overlay(alignment: .topLeading) {
-            if viewModel.isLoading {
-                ProgressView()
-                    .scaleEffect(0.7)
-                    .padding(.leading, 8)
-                    .padding(.top, 8)
+            VStack(alignment: .leading, spacing: 6) {
+                if viewModel.isLoading {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading flights…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(6)
+                    .background(.thinMaterial, in: Capsule())
                     .transition(.opacity)
+                }
+                if let progress = viewModel.bulkLoadProgress {
+                    HStack(spacing: 6) {
+                        ProgressView(value: progress)
+                            .controlSize(.small)
+                        Text("Loading all… \(Int(progress * 100))%")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(6)
+                    .background(.thinMaterial, in: Capsule())
+                    .transition(.opacity)
+                }
+                if let message = errorBanner {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                        Text(message).font(.caption)
+                        Spacer(minLength: 8)
+                        if initialFilters != nil {
+                            Button("Restore") {
+                                if let snap = initialFilters { restoreFilters(snap) }
+                                errorBanner = nil
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                        }
+                        Button("Report") {
+                            Task { await reportGuardrailFeedback() }
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                        Button("Dismiss") { errorBanner = nil }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                    }
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(.quaternary, lineWidth: 1)
+                    )
+                    .transition(.opacity)
+                }
             }
+            .padding([.top, .leading], 8)
         }
         .task {
                 viewModel.load()
+                if initialFilters == nil {
+                    initialFilters = snapshotCurrentFilters()
+                }
         }
         .sheet(isPresented: $showBenchmarkSheet) {
             AlgorithmicSearchView(viewModel: viewModel)
@@ -200,6 +273,27 @@ private struct MainContentView: View {
                 ForEach(resolvedPins) { pin in
                     Marker(pin.name, coordinate: pin.coordinate)
                 }
+                if let dest = destinationPin, let flight = selectedFlight {
+                    Annotation("", coordinate: dest.coordinate, anchor: UnitPoint(x: 0.5, y: 1.0)) {
+                        DestinationPopoverCard(
+                            title: "About \(flight.destination)",
+                            summary: destinationSummary,
+                            isLoading: isSummarizingDestination,
+                            airline: flight.airline,
+                            origin: flight.origin,
+                            destination: flight.destination,
+                            depdate: flight.depdate,
+                            durationMinutes: Int(flight.duration),
+                            price: flight.price_eco
+                        )
+                    }
+                }
+                if routeCoordinates.count >= 2 {
+                    MapPolyline(coordinates: routeCoordinates)
+                        .stroke(.blue, lineWidth: 3)
+                        .strokeStyle(style: .init(lineCap: .round, lineJoin: .round))
+
+                }
             }
             .mapStyle(.imagery(elevation: .realistic))
             .ignoresSafeArea()
@@ -207,11 +301,15 @@ private struct MainContentView: View {
             VStack {
                 HStack {
                     if viewModel.isLoading {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .padding(6)
-                            .background(.thinMaterial, in: Capsule())
-                            .padding([.top, .leading], 8)
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.mini)
+                            Text("Loading…")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(6)
+                        .background(.thinMaterial, in: Capsule())
+                        .padding([.top, .leading], 8)
                     }
                     Spacer()
                 }
@@ -223,7 +321,10 @@ private struct MainContentView: View {
 
     private func resolvePinsForSelectedFlight() async {
         guard let flight = selectedFlight else {
-            await MainActor.run { resolvedPins = [] }
+            await MainActor.run {
+                resolvedPins = []
+                routeCoordinates = []
+            }
             return
         }
         let biasRegion: MKCoordinateRegion?
@@ -236,8 +337,50 @@ private struct MainContentView: View {
         let results = await [origin, dest].compactMap { $0 }
         await MainActor.run {
             resolvedPins = results
-            fitCamera(to: results.map { $0.coordinate })
+            if results.count == 2 {
+                // Maintain route line
+                updateRoutePolyline(from: results[0].coordinate, to: results[1].coordinate)
+            } else {
+                routeCoordinates = []
+            }
+            // Identify destination pin using the selected flight's destination code
+            if let flight = selectedFlight {
+                destinationPin = results.first(where: { $0.code.caseInsensitiveCompare(flight.destination) == .orderedSame })
+            } else {
+                destinationPin = results.last
+            }
+            // Center camera on destination pin if available; otherwise fit to whatever we have
+            if let dest = destinationPin {
+                centerCamera(on: dest.coordinate)
+            } else {
+                fitCamera(to: results.map { $0.coordinate })
+            }
         }
+    }
+    
+    private func updateRoutePolyline(from origin: CLLocationCoordinate2D, to destination: CLLocationCoordinate2D) {
+        // Use MKGeodesicPolyline to sample a great-circle path that hugs the globe
+        let geodesic = MKGeodesicPolyline(coordinates: [origin, destination], count: 2)
+        var coords = [CLLocationCoordinate2D](repeating: kCLLocationCoordinate2DInvalid, count: geodesic.pointCount)
+        geodesic.getCoordinates(&coords, range: NSRange(location: 0, length: geodesic.pointCount))
+        // Downsample to a reasonable number of points for SwiftUI Map rendering
+        var sampled: [CLLocationCoordinate2D] = []
+        let step = max(1, geodesic.pointCount / 128)
+        for i in stride(from: 0, to: geodesic.pointCount, by: step) {
+            sampled.append(coords[i])
+        }
+        if let last = coords.last {
+            if let sampledLast = sampled.last {
+                let eps = 1e-9
+                let isSame = abs(sampledLast.latitude - last.latitude) < eps && abs(sampledLast.longitude - last.longitude) < eps
+                if !isSame {
+                    sampled.append(last)
+                }
+            } else {
+                sampled.append(last)
+            }
+        }
+        routeCoordinates = sampled
     }
 
     private func fitCamera(to coords: [CLLocationCoordinate2D]) {
@@ -261,6 +404,85 @@ private struct MainContentView: View {
                                         span: MKCoordinateSpan(latitudeDelta: max(1.0, (maxLat - minLat)),
                                                                longitudeDelta: max(1.0, (maxLon - minLon))))
         cameraPosition = .region(region)
+    }
+
+    private func centerCamera(on coord: CLLocationCoordinate2D) {
+        let region = MKCoordinateRegion(center: coord,
+                                        span: MKCoordinateSpan(latitudeDelta: 6, longitudeDelta: 6))
+        cameraPosition = .region(region)
+    }
+
+    private func summarizeForSelectedFlight() async {
+        guard let flight = selectedFlight else {
+            await MainActor.run { destinationSummary = nil }
+            return
+        }
+        // Check model availability first; if unavailable, clear and return silently
+        switch SystemLanguageModel.default.availability {
+        case .available: break
+        default:
+            await MainActor.run { destinationSummary = nil }
+            return
+        }
+        await MainActor.run { isSummarizingDestination = true }
+        defer { Task { await MainActor.run { isSummarizingDestination = false } } }
+        do {
+            let summary = try await DestinationSummaryAgent.shared.summarize(
+                destinationCode: flight.destination,
+                originCode: flight.origin,
+                airline: flight.airline,
+                depdate: flight.depdate,
+                durationMinutes: Int(flight.duration)
+            )
+            await MainActor.run { destinationSummary = summary }
+        } catch {
+            // Leave previous summary if any; optionally log
+            print("[Summary] failed:", error.localizedDescription)
+        }
+    }
+
+    private func snapshotCurrentFilters() -> FiltersSnapshot {
+        return FiltersSnapshot(
+            searchText: viewModel.searchText,
+            origin: viewModel.originFilter,
+            destination: viewModel.destinationFilter,
+            minPrice: viewModel.minPrice,
+            maxPrice: viewModel.maxPrice,
+            dateStart: viewModel.dateStart,
+            dateEnd: viewModel.dateEnd,
+            sortKey: viewModel.sortKey,
+            sortOrder: viewModel.sortOrder
+        )
+    }
+
+    private func restoreFilters(_ snap: FiltersSnapshot) {
+        viewModel.searchText = snap.searchText
+        viewModel.originFilter = snap.origin
+        viewModel.destinationFilter = snap.destination
+        viewModel.minPrice = snap.minPrice
+        viewModel.maxPrice = snap.maxPrice
+        viewModel.dateStart = snap.dateStart
+        viewModel.dateEnd = snap.dateEnd
+        viewModel.sortKey = snap.sortKey
+        viewModel.sortOrder = snap.sortOrder
+    }
+
+    private func clearFieldFiltersPreservingSort() {
+        viewModel.originFilter = ""
+        viewModel.destinationFilter = ""
+        viewModel.minPrice = nil
+        viewModel.maxPrice = nil
+        viewModel.dateStart = nil
+        viewModel.dateEnd = nil
+    }
+
+    private func reportGuardrailFeedback() async {
+        let q = lastFailedQuery ?? viewModel.searchText
+        let desc = lastErrorDescription
+        await NaturalFlightSearch.shared.logGuardrailFeedback(query: q, errorDescription: desc)
+        await MainActor.run {
+            errorBanner = "Feedback attachment logged. Please file via Feedback Assistant."
+        }
     }
 }
 
@@ -299,29 +521,6 @@ private struct FlightCardView: View {
                 .strokeBorder(.quaternary, lineWidth: 1)
         )
         
-    }
-}
-
-private struct SearchBarView: View {
-    @Binding var searchText: String
-    
-    init(searchText: Binding<String>) {
-        self._searchText = searchText
-    }
-    
-    var body: some View {
-        Section {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Where to?", text: $searchText)
-                    .textFieldStyle(.plain)
-            }
-            .padding()
-            .background(.primary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 4, trailing: 12))
-        .listRowBackground(Color.clear)
     }
 }
 
@@ -381,8 +580,95 @@ private struct AlgorithmicSearchView: View {
     }
 }
 
+private struct BubbleWithPointer: Shape {
+    var cornerRadius: CGFloat = 16
+    var pointerSize: CGSize = CGSize(width: 20, height: 10)
+    func path(in rect: CGRect) -> Path {
+        var r = rect
+        r.size.height -= pointerSize.height
+        var p = Path(roundedRect: r, cornerRadius: cornerRadius)
+        // Pointer centered at bottom
+        let midX = r.midX
+        p.move(to: CGPoint(x: midX - pointerSize.width/2, y: r.maxY))
+        p.addLine(to: CGPoint(x: midX, y: r.maxY + pointerSize.height))
+        p.addLine(to: CGPoint(x: midX + pointerSize.width/2, y: r.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+private struct DestinationPopoverCard: View {
+    let title: String
+    let summary: String?
+    let isLoading: Bool
+    let airline: String
+    let origin: String
+    let destination: String
+    let depdate: String
+    let durationMinutes: Int
+    let price: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            Group {
+                if isLoading {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Getting a quick overview…")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                    }
+                } else if let summary {
+                    Text(summary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(15)
+                        .multilineTextAlignment(.leading)
+                } else {
+                    Text("No summary available.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(airline).font(.footnote).bold()
+                Text("\(origin) -> \(destination)")
+                    .font(.subheadline).bold()
+                Text(depdate).font(.footnote).foregroundStyle(.secondary)
+                Text("\(durationMinutes) min").font(.footnote).foregroundStyle(.secondary)
+            }
+            HStack {
+                Spacer()
+                Button {
+                    // Hook for purchase
+                } label: {
+                    Text("Buy $\(String(format: "%.0f", price))")
+                        .font(.subheadline)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.green, in: Capsule())
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 320)
+        .background(
+            BubbleWithPointer()
+                .fill(.ultraThickMaterial)
+        )
+        .overlay(
+            BubbleWithPointer()
+                .stroke(.quaternary, lineWidth: 1)
+        )
+        .shadow(radius: 12)
+    }
+}
+
 #Preview {
     MainView()
         .modelContainer(Database.container)
 }
-

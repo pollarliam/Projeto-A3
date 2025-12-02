@@ -47,6 +47,14 @@ struct whereto_SwiftApp: App {
 
         .commands {
             DetailsCommands()
+            CommandMenu("Data") {
+                Button("Load All Flights") {
+                    if let vm = FlightsViewModelRegistry.shared.current {
+                        vm.loadAllFlightsInBackground()
+                    }
+                }
+                .keyboardShortcut("L", modifiers: [.command, .shift])
+            }
         }
     }
 }

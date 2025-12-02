@@ -246,58 +246,6 @@ struct Database {
         let container = try! ModelContainer(for: schema, configurations: [configuration])
         let context = ModelContext(container)
         
-        // Seed a few sample flights for previews
-        let samples: [Flights] = [
-            Flights(
-                id: 101,
-                csv_id: 1001,
-                depdate: "2025-12-01",
-                origin: "YYZ",
-                destination: "LAX",
-                duration: 310,
-                price_eco: 199,
-                price_exec: 549,
-                price_premium: 349,
-                demand: "medium",
-                early: 14,
-                population: 5000000,
-                airline: "Air Canada"
-            ),
-            Flights(
-                id: 202,
-                csv_id: 2002,
-                depdate: "2025-12-05",
-                origin: "JFK",
-                destination: "SFO",
-                duration: 360,
-                price_eco: 279,
-                price_exec: 699,
-                price_premium: 429,
-                demand: "high",
-                early: 21,
-                population: 8000000,
-                airline: "Delta"
-            ),
-            Flights(
-                id: 303,
-                csv_id: 3003,
-                depdate: "2025-12-10",
-                origin: "ORD",
-                destination: "SEA",
-                duration: 255,
-                price_eco: 159,
-                price_exec: 499,
-                price_premium: 329,
-                demand: "low",
-                early: 7,
-                population: 2700000,
-                airline: "United"
-            )
-        ]
-        
-        samples.forEach { context.insert($0) }
-        do { try context.save() } catch { dbLog("Preview seed save failed:", error.localizedDescription) }
-        
         return container
     }()
 #endif
