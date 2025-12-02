@@ -41,6 +41,9 @@ private struct MainContentView: View {
     @State private var destinationSummary: String? = nil
     @State private var isSummarizingDestination: Bool = false
 
+    @State private var selectionTask: Task<Void, Never>? = nil
+    @State private var selectionToken: UUID = UUID()
+
     @State private var initialFilters: FiltersSnapshot? = nil
     @State private var lastFailedQuery: String? = nil
     @State private var lastErrorDescription: String? = nil
@@ -135,10 +138,17 @@ private struct MainContentView: View {
                     )
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        // Dismiss current popover and clear previous summary before selecting a new flight
+                        destinationPin = nil
+                        destinationSummary = nil
                         selectedFlight = flight
-                        Task {
-                            await resolvePinsForSelectedFlight()
-                            await summarizeForSelectedFlight()
+                        // Cancel any in-flight selection work and start a new token
+                        selectionTask?.cancel()
+                        let token = UUID()
+                        selectionToken = token
+                        selectionTask = Task {
+                            await resolvePins(for: flight, token: token)
+                            await summarize(for: flight, token: token)
                         }
                     }
                     .onAppear {
@@ -153,33 +163,33 @@ private struct MainContentView: View {
         .frame(minWidth: 280)
         .toolbar {
             Menu {
-                Section("Sort by") {
-                    Picker("Key", selection: $viewModel.sortKey) {
-                        Text("Price").tag(FlightsViewModel.SortKey.price)
-                        Text("Date").tag(FlightsViewModel.SortKey.date)
-                        Text("Duration").tag(FlightsViewModel.SortKey.duration)
+                Section("Ordenar por") {
+                    Picker("Critério", selection: $viewModel.sortKey) {
+                        Text("Preço").tag(FlightsViewModel.SortKey.price)
+                        Text("Data").tag(FlightsViewModel.SortKey.date)
+                        Text("Duração").tag(FlightsViewModel.SortKey.duration)
                     }
-                    Picker("Order", selection: $viewModel.sortOrder) {
-                        Text("Ascending").tag(FlightsViewModel.SortOrder.ascending)
-                        Text("Descending").tag(FlightsViewModel.SortOrder.descending)
+                    Picker("Ordem", selection: $viewModel.sortOrder) {
+                        Text("Crescente").tag(FlightsViewModel.SortOrder.ascending)
+                        Text("Decrescente").tag(FlightsViewModel.SortOrder.descending)
                     }
                 }
                 
-                    Picker("Algorithm", selection: $viewModel.sortAlgorithm) {
-                        Text("Selection").tag(FlightsViewModel.SortAlgorithm.selection)
-                        Text("Insertion").tag(FlightsViewModel.SortAlgorithm.insertion)
-                        Text("Quick").tag(FlightsViewModel.SortAlgorithm.quick)
-                        Text("Merge").tag(FlightsViewModel.SortAlgorithm.merge)
+                    Picker("Algoritmo", selection: $viewModel.sortAlgorithm) {
+                        Text("Seleção").tag(FlightsViewModel.SortAlgorithm.selection)
+                        Text("Inserção").tag(FlightsViewModel.SortAlgorithm.insertion)
+                        Text("Quicksort").tag(FlightsViewModel.SortAlgorithm.quick)
+                        Text("Merge sort").tag(FlightsViewModel.SortAlgorithm.merge)
                     }
                     .pickerStyle(.inline)
                 
-                Section("Filters") {
-                    Button("Under $100") { viewModel.maxPrice = 100 }
-                    Button("$100 – $300") { viewModel.minPrice = 100; viewModel.maxPrice = 300 }
-                    Button("$300 – $600") { viewModel.minPrice = 300; viewModel.maxPrice = 600 }
-                    Button("$600+") { viewModel.minPrice = 600; viewModel.maxPrice = nil }
+                Section("Filtros") {
+                    Button("Até R$ 100") { viewModel.maxPrice = 100 }
+                    Button("R$ 100 – R$ 300") { viewModel.minPrice = 100; viewModel.maxPrice = 300 }
+                    Button("R$ 300 – R$ 600") { viewModel.minPrice = 300; viewModel.maxPrice = 600 }
+                    Button("Acima de R$ 600") { viewModel.minPrice = 600; viewModel.maxPrice = nil }
                     Divider()
-                    Button("Reset filters") {
+                    Button("Limpar filtros") {
                         viewModel.minPrice = nil
                         viewModel.maxPrice = nil
                         viewModel.originFilter = ""
@@ -188,12 +198,12 @@ private struct MainContentView: View {
                         viewModel.dateEnd = nil
                     }
                     Divider()
-                    Button("Algorithmic Search…") {
+                    Button("Busca Algorítmica…") {
                         showBenchmarkSheet = true
                     }
                 }
             } label: {
-                Label("Filter", systemImage: "line.3.horizontal.decrease",)
+                Label("Filtros", systemImage: "line.3.horizontal.decrease",)
             }
         }
         .searchable(text: $viewModel.searchText, placement: .sidebar)
@@ -202,7 +212,7 @@ private struct MainContentView: View {
                 if viewModel.isLoading {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)
-                        Text("Loading flights…")
+                        Text("Carregando voos…")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -214,7 +224,7 @@ private struct MainContentView: View {
                     HStack(spacing: 6) {
                         ProgressView(value: progress)
                             .controlSize(.small)
-                        Text("Loading all… \(Int(progress * 100))%")
+                        Text("Carregando tudo… \(Int(progress * 100))%")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -228,19 +238,19 @@ private struct MainContentView: View {
                         Text(message).font(.caption)
                         Spacer(minLength: 8)
                         if initialFilters != nil {
-                            Button("Restore") {
+                            Button("Restaurar") {
                                 if let snap = initialFilters { restoreFilters(snap) }
                                 errorBanner = nil
                             }
                             .buttonStyle(.borderless)
                             .font(.caption)
                         }
-                        Button("Report") {
+                        Button("Reportar") {
                             Task { await reportGuardrailFeedback() }
                         }
                         .buttonStyle(.borderless)
                         .font(.caption)
-                        Button("Dismiss") { errorBanner = nil }
+                        Button("Fechar") { errorBanner = nil }
                             .buttonStyle(.borderless)
                             .font(.caption)
                     }
@@ -276,7 +286,7 @@ private struct MainContentView: View {
                 if let dest = destinationPin, let flight = selectedFlight {
                     Annotation("", coordinate: dest.coordinate, anchor: UnitPoint(x: 0.5, y: 1.0)) {
                         DestinationPopoverCard(
-                            title: "About \(flight.destination)",
+                            title: "Sobre \(flight.destination)",
                             summary: destinationSummary,
                             isLoading: isSummarizingDestination,
                             airline: flight.airline,
@@ -284,7 +294,16 @@ private struct MainContentView: View {
                             destination: flight.destination,
                             depdate: flight.depdate,
                             durationMinutes: Int(flight.duration),
-                            price: flight.price_eco
+                            price: flight.price_eco,
+                            onClose: {
+                                destinationPin = nil
+                                destinationSummary = nil
+                                selectedFlight = nil
+                                // Invalidate any in-flight work for the previous selection
+                                selectionTask?.cancel()
+                                selectionToken = UUID()
+                                isSummarizingDestination = false
+                            }
                         )
                     }
                 }
@@ -303,7 +322,7 @@ private struct MainContentView: View {
                     if viewModel.isLoading {
                         HStack(spacing: 6) {
                             ProgressView().controlSize(.mini)
-                            Text("Loading…")
+                            Text("Carregando…")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -319,23 +338,21 @@ private struct MainContentView: View {
         }
     }
 
-    private func resolvePinsForSelectedFlight() async {
-        guard let flight = selectedFlight else {
-            await MainActor.run {
-                resolvedPins = []
-                routeCoordinates = []
-            }
-            return
-        }
+    private func resolvePins(for flight: Flights, token: UUID) async {
+        // Determine any bias region (currently unused but kept for compatibility)
         let biasRegion: MKCoordinateRegion?
         switch cameraPosition {
         default:
             biasRegion = nil
         }
+        if Task.isCancelled { return }
         async let origin = AirportSearchService.shared.resolve(code: flight.origin, biasRegion: biasRegion)
         async let dest = AirportSearchService.shared.resolve(code: flight.destination, biasRegion: biasRegion)
         let results = await [origin, dest].compactMap { $0 }
+        if Task.isCancelled { return }
         await MainActor.run {
+            // Only apply if this is still the current selection
+            guard selectionToken == token else { return }
             resolvedPins = results
             if results.count == 2 {
                 // Maintain route line
@@ -344,11 +361,7 @@ private struct MainContentView: View {
                 routeCoordinates = []
             }
             // Identify destination pin using the selected flight's destination code
-            if let flight = selectedFlight {
-                destinationPin = results.first(where: { $0.code.caseInsensitiveCompare(flight.destination) == .orderedSame })
-            } else {
-                destinationPin = results.last
-            }
+            destinationPin = results.first(where: { $0.code.caseInsensitiveCompare(flight.destination) == .orderedSame }) ?? results.last
             // Center camera on destination pin if available; otherwise fit to whatever we have
             if let dest = destinationPin {
                 centerCamera(on: dest.coordinate)
@@ -357,7 +370,52 @@ private struct MainContentView: View {
             }
         }
     }
-    
+
+    private func summarize(for flight: Flights, token: UUID) async {
+        // Check model availability first; if unavailable, clear and return silently
+        switch SystemLanguageModel.default.availability {
+        case .available: break
+        default:
+            await MainActor.run {
+                if selectionToken == token {
+                    destinationSummary = nil
+                    isSummarizingDestination = false
+                }
+            }
+            return
+        }
+        await MainActor.run {
+            if selectionToken == token {
+                isSummarizingDestination = true
+            }
+        }
+        defer {
+            Task { await MainActor.run {
+                if selectionToken == token {
+                    isSummarizingDestination = false
+                }
+            } }
+        }
+        do {
+            let summary = try await DestinationSummaryAgent.shared.summarize(
+                destinationCode: flight.destination,
+                originCode: flight.origin,
+                airline: flight.airline,
+                depdate: flight.depdate,
+                durationMinutes: Int(flight.duration)
+            )
+            if Task.isCancelled { return }
+            await MainActor.run {
+                if selectionToken == token {
+                    destinationSummary = summary
+                }
+            }
+        } catch {
+            // Leave previous summary if any; optionally log
+            print("[Summary] failed:", error.localizedDescription)
+        }
+    }
+
     private func updateRoutePolyline(from origin: CLLocationCoordinate2D, to destination: CLLocationCoordinate2D) {
         // Use MKGeodesicPolyline to sample a great-circle path that hugs the globe
         let geodesic = MKGeodesicPolyline(coordinates: [origin, destination], count: 2)
@@ -412,35 +470,6 @@ private struct MainContentView: View {
         cameraPosition = .region(region)
     }
 
-    private func summarizeForSelectedFlight() async {
-        guard let flight = selectedFlight else {
-            await MainActor.run { destinationSummary = nil }
-            return
-        }
-        // Check model availability first; if unavailable, clear and return silently
-        switch SystemLanguageModel.default.availability {
-        case .available: break
-        default:
-            await MainActor.run { destinationSummary = nil }
-            return
-        }
-        await MainActor.run { isSummarizingDestination = true }
-        defer { Task { await MainActor.run { isSummarizingDestination = false } } }
-        do {
-            let summary = try await DestinationSummaryAgent.shared.summarize(
-                destinationCode: flight.destination,
-                originCode: flight.origin,
-                airline: flight.airline,
-                depdate: flight.depdate,
-                durationMinutes: Int(flight.duration)
-            )
-            await MainActor.run { destinationSummary = summary }
-        } catch {
-            // Leave previous summary if any; optionally log
-            print("[Summary] failed:", error.localizedDescription)
-        }
-    }
-
     private func snapshotCurrentFilters() -> FiltersSnapshot {
         return FiltersSnapshot(
             searchText: viewModel.searchText,
@@ -481,7 +510,7 @@ private struct MainContentView: View {
         let desc = lastErrorDescription
         await NaturalFlightSearch.shared.logGuardrailFeedback(query: q, errorDescription: desc)
         await MainActor.run {
-            errorBanner = "Feedback attachment logged. Please file via Feedback Assistant."
+            errorBanner = "Anexo de feedback registrado. Por favor envie pelo Feedback Assistant."
         }
     }
 }
@@ -498,7 +527,7 @@ private struct FlightCardView: View {
                 Text(code)
                     .font(.headline)
                 Spacer()
-                Text(price, format: .currency(code: "R$"))
+                Text(price, format: .currency(code: "BRL"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -530,39 +559,39 @@ private struct AlgorithmicSearchView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Algorithmic Search Benchmarks")
+            Text("Benchmark de Busca Algorítmica")
                 .font(.headline)
 
-            TextField("Benchmark query", text: $viewModel.benchmarkQuery)
+            TextField("Consulta para benchmark", text: $viewModel.benchmarkQuery)
                 .textFieldStyle(.roundedBorder)
 
-            Picker("Key", selection: $viewModel.searchKey) {
+            Picker("Campo", selection: $viewModel.searchKey) {
                 Text("ID").tag(FlightsViewModel.SearchKey.id)
-                Text("Origin").tag(FlightsViewModel.SearchKey.origin)
-                Text("Destination").tag(FlightsViewModel.SearchKey.destination)
-                Text("Airline").tag(FlightsViewModel.SearchKey.airline)
-                Text("Price").tag(FlightsViewModel.SearchKey.price)
+                Text("Origem").tag(FlightsViewModel.SearchKey.origin)
+                Text("Destino").tag(FlightsViewModel.SearchKey.destination)
+                Text("Companhia").tag(FlightsViewModel.SearchKey.airline)
+                Text("Preço").tag(FlightsViewModel.SearchKey.price)
             }
 
-            Picker("Algorithm", selection: $viewModel.searchAlgorithm) {
+            Picker("Algoritmo", selection: $viewModel.searchAlgorithm) {
                 Text("Linear").tag(FlightsViewModel.SearchAlgorithm.linear)
-                Text("Binary").tag(FlightsViewModel.SearchAlgorithm.binary)
+                Text("Binária").tag(FlightsViewModel.SearchAlgorithm.binary)
                 Text("Hash").tag(FlightsViewModel.SearchAlgorithm.hash)
             }
 
             HStack {
-                Button("Run Selected") {
+                Button("Executar selecionado") {
                     viewModel.executeSearch(query: viewModel.benchmarkQuery)
                 }
-                Button("Run All") {
+                Button("Executar todos") {
                     viewModel.runSearchBenchmarks()
                 }
                 Spacer()
-                Button("Close") { dismiss() }
+                Button("Fechar") { dismiss() }
             }
             Divider()
             if viewModel.benchmarkResults.isEmpty {
-                Text("No results yet. Run a search to see matches.")
+                Text("Ainda não há resultados. Execute uma busca para ver correspondências.")
                     .foregroundStyle(.secondary)
             } else {
                 List(viewModel.benchmarkResults, id: \.persistentModelID) { flight in
@@ -607,16 +636,58 @@ private struct DestinationPopoverCard: View {
     let depdate: String
     let durationMinutes: Int
     let price: Double
+    let onClose: (() -> Void)
+
+    init(
+        title: String,
+        summary: String?,
+        isLoading: Bool,
+        airline: String,
+        origin: String,
+        destination: String,
+        depdate: String,
+        durationMinutes: Int,
+        price: Double,
+        onClose: @escaping () -> Void = {}
+    ) {
+        self.title = title
+        self.summary = summary
+        self.isLoading = isLoading
+        self.airline = airline
+        self.origin = origin
+        self.destination = destination
+        self.depdate = depdate
+        self.durationMinutes = durationMinutes
+        self.price = price
+        self.onClose = onClose
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.headline)
+            HStack {
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Button(action: { onClose() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(6)
+                        .background(.thinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+            if price > 0 {
+                Text("Preço: \(price, format: .currency(code: "BRL"))")
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.green.opacity(0.15), in: Capsule())
+            }
             Group {
                 if isLoading {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)
-                        Text("Getting a quick overview…")
+                        Text("Obtendo um resumo rápido…")
                             .foregroundStyle(.secondary)
                             .font(.subheadline)
                     }
@@ -627,7 +698,7 @@ private struct DestinationPopoverCard: View {
                         .lineLimit(15)
                         .multilineTextAlignment(.leading)
                 } else {
-                    Text("No summary available.")
+                    Text("Nenhum resumo disponível.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -638,20 +709,7 @@ private struct DestinationPopoverCard: View {
                 Text("\(origin) -> \(destination)")
                     .font(.subheadline).bold()
                 Text(depdate).font(.footnote).foregroundStyle(.secondary)
-                Text("\(durationMinutes) min").font(.footnote).foregroundStyle(.secondary)
-            }
-            HStack {
-                Spacer()
-                Button {
-                    // Hook for purchase
-                } label: {
-                    Text("Buy $\(String(format: "%.0f", price))")
-                        .font(.subheadline)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Color.green, in: Capsule())
-                        .foregroundColor(.white)
-                }
+                
             }
         }
         .padding(16)
@@ -672,3 +730,4 @@ private struct DestinationPopoverCard: View {
     MainView()
         .modelContainer(Database.container)
 }
+

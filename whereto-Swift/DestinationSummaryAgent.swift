@@ -4,7 +4,7 @@
 import Foundation
 import FoundationModels
 
-@Generable(description: "Compact travel overview for a destination to show in a popover. Keep friendly, factual, and helpful. No safety warnings or apologies.")
+@Generable(description: "Um resumo conciso em múltiplos parágrafos (<= 15 linhas quando exibido) sobre o destino cobrindo clima/ambiente, principais atrações, gastronomia, bairros e por que vale a pena visitar. Evite listas em markdown; escreva em prosa. Prefira 3–6 frases. Mencione o nome da cidade explicitamente.")
 struct DestinationSummary: Sendable {
     @Guide(description: "A concise multi-paragraph summary (<= 15 lines when displayed) about the destination covering vibe, top attractions, food, neighborhoods, and why it's worth visiting. Avoid markdown lists; write as prose. Prefer 3–6 sentences. Mention the city name explicitly.")
     var text: String
@@ -29,17 +29,18 @@ actor DestinationSummaryAgent {
 
     init() {
         let instructions = """
-        You are a travel writer for a flight app. You will be given an IATA destination code and a Resolved section that contains the mapped city and coordinates from the app's local airport directory.
+        Você é um redator de viagens para um app de passagens aéreas. Você receberá um código IATA de destino e uma seção "Resolved" que contém a cidade e coordenadas mapeadas a partir do diretório local de aeroportos do app.
 
-        Follow these rules strictly:
-        - Always use the provided resolved city names. Do not infer or guess cities from codes.
-        - If Resolved.destination.city is missing, refer to "the destination" generically and do not name a city.
-        - Do not contradict the Resolved information.
-        - Tone: warm, energetic, helpful; write 3–6 sentences.
-        - Include 2–4 highlights (neighborhoods, culture, landmarks, food) woven into prose.
-        - Avoid safety disclaimers, warnings, or apologies. Never apologize.
-        - Keep it self-contained and neutral; no links.
-        - Target length so it fits under 15 lines in a narrow card.
+        Siga estas regras estritamente:
+        - Sempre use os nomes de cidade resolvidos fornecidos. Não infira ou adivinhe cidades a partir de códigos.
+        - Se Resolved.destination.city estiver ausente, refira-se genericamente a "o destino" e não nomeie uma cidade.
+        - Não contradiga as informações de Resolved.
+        - Tom: caloroso, simpático, prestativo; escreva 3–6 frases.
+        - Inclua 2–4 destaques (cultura, pontos turísticos, gastronomia) entrelaçados em prosa.
+        - Evite avisos de segurança, advertências ou desculpas. Nunca peça desculpas.
+        - Mantenha o texto autocontido e neutro; sem links.
+        - Tamanho alvo para caber em até 15 linhas em um cartão estreito.
+        - Escreva em português do Brasil.
         """
         self.session = LanguageModelSession(instructions: instructions)
     }
@@ -76,22 +77,19 @@ actor DestinationSummaryAgent {
         }
 
         let prompt = """
-        Summarize the destination for a traveler considering this itinerary:
+        Resuma o destino para um viajante considerando este itinerário:
 
-        Itinerary:
-        - Origin code: \(originCode.uppercased())
-        - Destination code: \(destinationCode.uppercased())
-        - Airline: \(airline)
-        - Departure: \(depdate)
-        - Duration: \(durationMinutes) minutes
-
-        Resolved (from local airport directory; authoritative — do not infer beyond this):
+        Itinerário:
+        - Código de destino: \(destinationCode.uppercased())
+        
+        Resolved (do diretório local de aeroportos; é autoritativo — não infira além disso):
         \(resolvedJSON)
 
-        Write a concise overview suitable for a small popover. Do not include headings. Use the resolved destination city name if present; otherwise, refer to "the destination" generically without guessing a name.
+        Escreva uma visão geral concisa do destino, adequada para um pequeno popover. Não inclua títulos. Use o nome da cidade de destino resolvido se presente; caso contrário, refira-se genericamente a "o destino" sem tentar adivinhar um nome. 
         """
 
         let response = try await session.respond(to: prompt, generating: DestinationSummary.self)
         return response.content.text
     }
 }
+

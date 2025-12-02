@@ -63,7 +63,7 @@ actor NaturalFlightSearch {
 
         Examples (for understanding only):
         - "show me flights to gru" -> destination = GRU
-        - "cheap flights from San Francisco to New York next weekend under $300" -> origin = "San Francisco", destination = "New York", maxPrice=300, sortKey=price, sortOrder=ascending
+        - "cheap flights from San Francisco to New York next weekend under R$300" -> origin = "San Francisco", destination = "New York", maxPrice=300, sortKey=price, sortOrder=ascending
         """
         self.session = LanguageModelSession(instructions: instructions)
     }
@@ -241,3 +241,4 @@ actor NaturalFlightSearch {
         print("[NaturalFlightSearch] Feedback: Query=\(q) | Issues=\(issues) | Desired=\(desired)")
     }
 }
+

@@ -40,15 +40,15 @@ struct whereto_SwiftApp: App {
         .windowStyle(.hiddenTitleBar)
         .modelContainer(sharedModelContainer)
 
-        Window("Run History", id: "RunHistory") {
+        Window("Histórico de Execuções", id: "RunHistory") {
             RunHistoryView()
         }
         .modelContainer(sharedModelContainer)
 
         .commands {
             DetailsCommands()
-            CommandMenu("Data") {
-                Button("Load All Flights") {
+            CommandMenu("Dados") {
+                Button("Carregar Todos os Voos") {
                     if let vm = FlightsViewModelRegistry.shared.current {
                         vm.loadAllFlightsInBackground()
                     }

@@ -20,28 +20,28 @@ struct RunHistoryView: View {
         Group {
             if let vm = registry.current {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Sorting Metrics")
+                    Text("Métricas de Ordenação")
                         .font(.headline)
                     List {
                         ForEach(runs) { record in
-                            Text("run\(record.id): key=\(record.sortKey.rawValue), order=\(record.sortOrder.rawValue), algo=\(record.algorithm.rawValue), time=\(String(format: "%.5f", record.durationSeconds))s")
+                            Text("run\(record.id): chave=\(record.sortKey.rawValue), ordem=\(record.sortOrder.rawValue), algoritmo=\(record.algorithm.rawValue), tempo=\(String(format: "%.5f", record.durationSeconds))s")
                                 .font(.system(.body, design: .monospaced))
                         }
                     }
                     .frame(minHeight: 140)
 
-                    Text("Search Metrics")
+                    Text("Métricas de Busca")
                         .font(.headline)
                         .padding(.top, 8)
                     List {
                         ForEach(searchRuns) { record in
-                            Text("run\(record.id): key=\(record.key.rawValue), algo=\(record.algorithm.rawValue), query=\(record.query), matches=\(record.matches), time=\(String(format: "%.5f", record.durationSeconds))s")
+                            Text("run\(record.id): chave=\(record.key.rawValue), algoritmo=\(record.algorithm.rawValue), consulta=\(record.query), correspondências=\(record.matches), tempo=\(String(format: "%.5f", record.durationSeconds))s")
                                 .font(.system(.body, design: .monospaced))
                         }
                     }
                     .frame(minHeight: 140)
                 }
-                .navigationTitle("Run History")
+                .navigationTitle("Histórico de Execuções")
                 .frame(minWidth: 500, minHeight: 380)
                 .onAppear {
                     // Seed with current history
@@ -68,9 +68,9 @@ struct RunHistoryView: View {
                 }
             } else {
                 VStack(spacing: 12) {
-                    Text("No run history yet")
+                    Text("Ainda não há histórico")
                         .font(.headline)
-                    Text("Open the main window and perform a sort to generate runs.")
+                    Text("Abra a janela principal e execute uma ordenação para gerar execuções.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
